@@ -12,6 +12,7 @@ for build_type in ${BUILD_TYPES}; do
 	popd
 done
 
+echo -e "\033[1mcompile_commands: \033[0m"
 touch build/compile_commands.json
 jq -s add $(find -wholename "./build/*/**.json") >build/compile_commands.json
 
@@ -20,11 +21,12 @@ source scripts/format.sh
 source scripts/tidy.sh
 
 echo -e "\033[1munit testing: \033[0m"
-
 for build_type in ${BUILD_TYPES}; do
 	pushd build/${build_type}
 	ctest -j4 --output-on-failure
 	popd
 done
 
+echo -e "\033[1mgenerating docs and coverage info: \033[0m"
+doxygen
 ./scripts/coverage.sh
