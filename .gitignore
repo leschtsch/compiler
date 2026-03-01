@@ -1,0 +1,8 @@
+**build**
+**.swp
+**.swo
+**output**
+**bin**
+**coverage**
+
+!scripts/coverage.sh
