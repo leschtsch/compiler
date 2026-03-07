@@ -28,5 +28,5 @@ for build_type in ${BUILD_TYPES}; do
 done
 
 echo -e "\033[1mgenerating docs and coverage info: \033[0m"
-doxygen
+doxygen > doxygen.log
 ./scripts/coverage.sh

@@ -84,7 +84,7 @@ CheckOptions:
 Language: cpp
 
 ExtraArgs:
-  - '-std=c++20'
+  - '-std=c++23'
 
 Checks: >
   -cppcoreguidelines-*
