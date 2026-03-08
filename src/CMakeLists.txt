@@ -1,1 +1,3 @@
 ADD_EXECUTABLE(main main.cpp)
+
+ADD_SUBDIRECTORY(lexer)

@@ -1,14 +1,13 @@
 #include "ecs/ecs.hpp"
 
-#include <exception>
 #include <gtest/gtest.h>
 
 TEST(Ecs, CRUD) {
-  struct C1 : public ecs::BaseComponent<int> {};
-  struct C2 : public ecs::BaseComponent<int> {};
+  struct C1 : public ecs::Component<int> {};
+  struct C2 : public ecs::Component<int> {};
 
-  ecs::Entity entity1 = ecs::CreateEntity();
-  ecs::Entity entity2 = ecs::CreateEntity();
+  ecs::Entity entity1{};
+  ecs::Entity entity2{};
   EXPECT_NE(entity1.id, entity2.id);
 
   EXPECT_FALSE(ecs::Get<C1>(entity1).HasValue());
@@ -79,9 +78,9 @@ std::size_t Counted::move_assign = 0;
 std::size_t Counted::destructor = 0;
 
 TEST(Ecs, MoveSemantics) {
-  struct C1 : public ecs::BaseComponent<Counted> {};
-  ecs::Entity entity1 = ecs::CreateEntity();
-  ecs::Entity entity2 = ecs::CreateEntity();
+  struct C1 : public ecs::Component<Counted> {};
+  ecs::Entity entity1{};
+  ecs::Entity entity2{};
 
   Counted val1;
   Counted val2;
@@ -106,6 +105,12 @@ TEST(Ecs, MoveSemantics) {
   EXPECT_EQ(Counted::move_assign, 1);
   val2 = std::move(ecs::Get<C1>(entity1).Value());
   EXPECT_EQ(Counted::move_assign, 2);
+}
+
+TEST(Ecs, OptionalAccess) {
+  struct C1 : public ecs::Component<Counted> {};
+  ecs::Entity entity1{};
+  EXPECT_ANY_THROW(auto dummy = ecs::Get<C1>(entity1).Value());
 }
 
 int main() {

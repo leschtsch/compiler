@@ -20,6 +20,11 @@ namespace details {
 
 using IdT = std::uint64_t;
 
+inline IdT GetID() {
+  static IdT next_id = 0;
+  return ++next_id;
+};
+
 template <typename T>
 concept BareType =
     !std::is_reference_v<T> && !std::is_const_v<T> && !std::is_volatile_v<T>;
@@ -27,23 +32,23 @@ concept BareType =
 }  // namespace details
 
 struct Entity {
-  details::IdT id{0};
+  details::IdT id{details::GetID()};
 };
 
 template <details::BareType Type>
-struct BaseComponent {};
+struct Component {};
 
 namespace details {
 
 template <typename T>
-constexpr T GetTypeHelper(BaseComponent<T>);
+constexpr T GetTypeHelper(Component<T>);
 
 template <typename T>
 using GetTypeT = decltype(GetTypeHelper(std::declval<T>()));
 }  // namespace details
 
 template <typename T>
-concept Component = std::derived_from<T, BaseComponent<details::GetTypeT<T>>>;
+concept IsComponent = std::derived_from<T, Component<details::GetTypeT<T>>>;
 
 namespace details {
 
@@ -91,10 +96,10 @@ struct OptionalReference {
 
 template <typename T, typename C>
 concept MatchesComponent =
-    Component<C> &&
+    IsComponent<C> &&
     std::same_as<GetTypeT<C>, std::remove_reference_t<std::remove_cv_t<T>>>;
 
-template <Component C>
+template <IsComponent C>
 class EcsHelper {
  private:
   using Type = GetTypeT<C>;
@@ -122,27 +127,22 @@ class EcsHelper {
 };
 }  // namespace details
 
-template <Component C, details::MatchesComponent<C> T>
+template <IsComponent C, details::MatchesComponent<C> T>
 void Set(const Entity& entity, T&& component) {
   details::EcsHelper<C>::Set(entity, std::forward<T>(component));
 }
 
-template <Component C>
+template <IsComponent C>
 void Drop(const Entity& entity) {
   details::EcsHelper<C>::Drop(entity);
 }
 
-template <Component C>
+template <IsComponent C>
 auto Get(const Entity& entity) {
   return details::EcsHelper<C>::Get(entity);
 }
 
-inline Entity CreateEntity() {
-  static details::IdT next_id = 0;
-  return Entity{.id = next_id++};
-}
-
-template <Component C>
+template <IsComponent C>
 std::unordered_map<details::IdT, typename details::EcsHelper<C>::Type>
     details::EcsHelper<C>::storage = {};
 

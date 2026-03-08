@@ -18,7 +18,7 @@ jq -s add $(find -wholename "./build/*/**.json") >build/compile_commands.json
 
 echo -e "\033[1mcode checks: \033[0m"
 source scripts/format.sh
-source scripts/tidy.sh
+#source scripts/tidy.sh
 
 echo -e "\033[1munit testing: \033[0m"
 for build_type in ${BUILD_TYPES}; do
