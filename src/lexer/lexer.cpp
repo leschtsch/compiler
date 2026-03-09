@@ -2,31 +2,48 @@
 
 #include <ecs/ecs.hpp>
 #include <ecs/used_components.hpp>
+#include <utils/trie.hpp>
 
 #include <array>
+#include <cassert>
+#include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <expected>
 #include <string>
-#include <string_view>
 #include <utility>
-#include <variant>
 
 #include "tokens.hpp"
 
 namespace lexer {
 
-Lexer::Lexer(std::string_view input) : input_(input) {}
+Lexer::Lexer(std::string input) : input_(std::move(input)) {
+  BuildKeywordsMap();
+  BuildOtherTokens();
+}
 
 auto Lexer::NextToken() -> Lexer::TokenVariant {
   if (reading_string_) {
     return GetString();
   }
 
-  auto skip_comment = TrySkipComment();
-  if (!std::holds_alternative<tokens::NopToken>(skip_comment)) {
-    return skip_comment;
+  bool need_skip = true;
+  while (need_skip) {
+    need_skip = false;
+    start_position_ = position_;
+
+    auto skip_comment = TrySkipComment();
+    if (!skip_comment.has_value()) {
+      return skip_comment.error();
+    }
+
+    need_skip |= skip_comment.value();
+
+    need_skip |= SkipWs();
   }
+
+  start_position_ = position_;
 
   if (AtEof()) {
     return tokens::EofToken{};
@@ -36,19 +53,36 @@ auto Lexer::NextToken() -> Lexer::TokenVariant {
     return GetString();
   }
 
-  return tokens::EofToken{};
+  if (std::isdigit(Getchr()) != 0) {
+    return GetNum();
+  }
+
+  if (std::isalpha(Getchr()) != 0 || Getchr() == '_') {
+    return GetIdOrKeyword();
+  }
+
+  if (Getchr() != '.') {
+    return GetOther();
+  }
+
+  std::size_t next = position_.index + 1;
+  if (next >= input_.size() || std::isdigit(Getchr()) == 0) {
+    return GetOther();
+  }
+
+  return GetNum();
 }
 
-auto Lexer::TrySkipComment() -> TokenVariant {
+auto Lexer::TrySkipComment() -> std::expected<bool, tokens::ErrorToken> {
   std::size_t cur = position_.index;
   std::size_t next = cur + 1;
 
   if (next >= input_.size()) {
-    return tokens::NopToken{};
+    return false;
   }
 
   if (input_[cur] != '/') {
-    return tokens::NopToken{};
+    return false;
   }
 
   if (input_[next] == '/') {
@@ -59,10 +93,10 @@ auto Lexer::TrySkipComment() -> TokenVariant {
     return SkipCommentMultiLiner();
   }
 
-  return tokens::NopToken{};
+  return false;
 }
 
-auto Lexer::SkipCommentOneLiner() -> TokenVariant {
+auto Lexer::SkipCommentOneLiner() -> std::expected<bool, tokens::ErrorToken> {
   NextPosition(2);
 
   while (!AtEof() && Getchr() != '\n') {
@@ -73,12 +107,10 @@ auto Lexer::SkipCommentOneLiner() -> TokenVariant {
     NextPositionOnce();
   }
 
-  return tokens::NopToken{};
+  return true;
 }
 
-auto Lexer::SkipCommentMultiLiner() -> TokenVariant {
-  stash_position_ = position_;
-
+auto Lexer::SkipCommentMultiLiner() -> std::expected<bool, tokens::ErrorToken> {
   NextPosition(2);
   size_t comment_depth = 1;
 
@@ -102,19 +134,18 @@ auto Lexer::SkipCommentMultiLiner() -> TokenVariant {
   }
 
   if (comment_depth == 0) {
-    return tokens::NopToken{};
+    return true;
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<ErrorStart>(error, stash_position_);
-  ecs::Set<ErrorStop>(error, position_);
+  ecs::Set<TokenStart>(error, start_position_);
+  ecs::Set<TokenStop>(error, position_);
   ecs::Set<ErrorMessage>(error, std::string("comment not closed"));
-  return error;
+  return std::unexpected(error);
 }
 
 auto Lexer::GetString() -> TokenVariant {
   if (!reading_string_) {
-    stash_position_ = position_;
     NextPositionOnce();
     reading_string_ = true;
   }
@@ -143,12 +174,14 @@ auto Lexer::GetString() -> TokenVariant {
     NextPositionOnce();
     auto result = tokens::String{};
     ecs::Set<StrValue>(result, std::move(accumulated_string_));
+    ecs::Set<TokenStart>(result, start_position_);
+    ecs::Set<TokenStop>(result, position_);
     return result;
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<ErrorStart>(error, stash_position_);
-  ecs::Set<ErrorStop>(error, position_);
+  ecs::Set<TokenStart>(error, start_position_);
+  ecs::Set<TokenStop>(error, position_);
   ecs::Set<ErrorMessage>(error, std::string("string not terminated"));
   return error;
 }
@@ -158,8 +191,8 @@ auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 
   if (AtEof()) {
     auto error = tokens::ErrorToken{};
-    ecs::Set<ErrorStart>(error, stash_position_);
-    ecs::Set<ErrorStop>(error, position_);
+    ecs::Set<TokenStart>(error, start_position_);
+    ecs::Set<TokenStop>(error, position_);
     ecs::Set<ErrorMessage>(error, std::string("string not terminated"));
     return std::unexpected(error);
   }
@@ -193,7 +226,7 @@ auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 
     default: {
       auto error = tokens::ErrorToken{};
-      ecs::Set<ErrorStop>(error, position_);
+      ecs::Set<TokenStop>(error, position_);
       ecs::Set<ErrorMessage>(error, std::string("unknown escape sequence"));
       return std::unexpected(error);
     }
@@ -208,8 +241,8 @@ auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 
   if (next >= input_.size()) {
     auto error = tokens::ErrorToken{};
-    ecs::Set<ErrorStart>(error, stash_position_);
-    ecs::Set<ErrorStop>(error, position_);
+    ecs::Set<TokenStart>(error, start_position_);
+    ecs::Set<TokenStop>(error, position_);
     ecs::Set<ErrorMessage>(error, std::string("string not terminated"));
     return std::unexpected(error);
   }
@@ -223,9 +256,90 @@ auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<ErrorStop>(error, position_);
+  ecs::Set<TokenStop>(error, position_);
   ecs::Set<ErrorMessage>(error, std::string("unknown hex escape sequence"));
   return std::unexpected(error);
+}
+
+auto Lexer::GetNum() -> TokenVariant {
+  char* start = input_.data() + position_.index;
+  char* int_end = nullptr;
+  char* float_end = nullptr;
+
+  std::uint64_t int_value = std::strtoull(start, &int_end, 0);
+  long double float_value = std::strtold(start, &float_end);
+
+  position_.index += std::max(int_end - start, float_end - start);
+
+  if (int_end == float_end) {
+    tokens::Int result{};
+    ecs::Set<IntValue>(result, int_value);
+    ecs::Set<TokenStart>(result, start_position_);
+    ecs::Set<TokenStop>(result, position_);
+    return result;
+  }
+
+  tokens::Float result{};
+  ecs::Set<FloatValue>(result, float_value);
+  ecs::Set<TokenStart>(result, start_position_);
+  ecs::Set<TokenStop>(result, position_);
+  return result;
+}
+
+auto Lexer::GetIdOrKeyword() -> TokenVariant {
+  while (!AtEof() && (std::isalnum(Getchr()) != 0 || Getchr() == '_')) {
+    NextPositionOnce();
+  }
+
+  std::size_t len = position_.index - start_position_.index;
+  // FIXME: need transparent hash
+  std::string name = std::string(input_.substr(start_position_.index, len));
+
+  auto found = keywords_map_.find(name);
+  if (found != keywords_map_.end()) {
+    return found->second(start_position_, position_);
+  }
+
+  auto result = tokens::IdToken{};
+  ecs::Set<IdName>(result, std::string(name));
+  ecs::Set<TokenStart>(result, start_position_);
+  ecs::Set<TokenStop>(result, position_);
+  return result;
+}
+
+auto Lexer::GetOther() -> TokenVariant {
+  char chr = Getchr();
+  auto* node = other_tokens_.NextNode(chr);
+  auto* last_node = node;
+
+  NextPositionOnce();
+  auto last_position = position_;
+
+  while (!AtEof() && node != nullptr) {
+    if (node->HasValue()) {
+      last_position = position_;
+      last_node = node;
+    }
+
+    chr = Getchr();
+    NextPositionOnce();
+    node = other_tokens_.NextNode(chr, node);
+  }
+
+  if (node == nullptr || !node->HasValue()) {
+    position_ = last_position;
+    node = last_node;
+  }
+
+  if (node != nullptr && node->HasValue()) {
+    return node->Value()(start_position_, position_);
+  }
+
+  auto error = tokens::ErrorToken{};
+  ecs::Set<TokenStart>(error, start_position_);
+  ecs::Set<TokenStop>(error, position_);
+  ecs::Set<ErrorMessage>(error, std::string("unexpected symbol"));
+  return error;
 }
 
 void Lexer::NextPositionOnce() {
@@ -253,4 +367,67 @@ void Lexer::NextPosition(std::size_t n) {
 auto Lexer::AtEof() -> bool { return position_.index == input_.size(); }
 auto Lexer::Getchr() -> char { return input_[position_.index]; }
 
-};  // namespace lexer
+auto Lexer::SkipWs() -> bool {
+  bool res = false;
+
+  while (!AtEof() && std::isspace(Getchr()) != 0) {
+    res = true;
+    NextPositionOnce();
+  }
+
+  return res;
+}
+
+void Lexer::BuildKeywordsMap() {
+#define KEYWORD(name)                                            \
+  {                                                              \
+    using KwType = tokens::Keyword_##name;                       \
+    keywords_map_.emplace(                                       \
+        #name,                                                   \
+        +[](const utils::SourcePosition& start,                  \
+            const utils::SourcePosition& stop) -> TokenVariant { \
+          auto res = KwType{};                                   \
+          ecs::Set<TokenStart>(res, start);                      \
+          ecs::Set<TokenStop>(res, stop);                        \
+          return TokenVariant(res);                              \
+        });                                                      \
+  }
+
+#include <language_data/keywords.dat>
+
+#undef KEYWORD
+}
+
+void Lexer::BuildOtherTokens() {
+#define EXPAND(name, type, str)                                  \
+  {                                                              \
+    using KwType = tokens::type##name;                           \
+    other_tokens_.Insert(                                        \
+        std::string(str),                                        \
+        +[](const utils::SourcePosition& start,                  \
+            const utils::SourcePosition& stop) -> TokenVariant { \
+          auto res = KwType{};                                   \
+          ecs::Set<TokenStart>(res, start);                      \
+          ecs::Set<TokenStop>(res, stop);                        \
+          return TokenVariant(res);                              \
+        });                                                      \
+  }
+
+#define UN_OP(name, str) EXPAND(name, Un, str)
+#define BIN_OP(name, str) EXPAND(name, Bin, str)
+#define SYNT_TOKEN(name, str) EXPAND(name, Syntax, str)
+
+  // clang-format off: oerder important so that binary > unary
+#include <language_data/un_ops.dat>
+#include <language_data/bin_ops.dat>
+#include <language_data/synt_tokens.dat>
+  // clang-format on
+
+#undef EXPAND
+
+#undef UN_OP
+#undef BIN_OP
+#undef SYNT_TOKEN
+}
+
+}  // namespace lexer

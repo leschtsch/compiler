@@ -20,7 +20,7 @@ namespace details {
 
 using IdT = std::uint64_t;
 
-inline IdT GetID() {
+inline auto GetID() -> IdT {
   static IdT next_id = 0;
   return ++next_id;
 };
@@ -41,7 +41,7 @@ struct Component {};
 namespace details {
 
 template <typename T>
-constexpr T GetTypeHelper(Component<T>);
+constexpr auto GetTypeHelper(Component<T>) -> T;
 
 template <typename T>
 using GetTypeT = decltype(GetTypeHelper(std::declval<T>()));
@@ -60,21 +60,21 @@ struct OptionalReference {
 
   // non-copyable
   OptionalReference(const OptionalReference& other) = delete;
-  OptionalReference& operator=(const OptionalReference& other) = delete;
+  auto operator=(const OptionalReference& other) -> OptionalReference& = delete;
 
   // non-movable
   OptionalReference(OptionalReference&& other) = delete;
-  OptionalReference& operator=(OptionalReference&& other) = delete;
+  auto operator=(OptionalReference&& other) -> OptionalReference& = delete;
 
-  T* operator->() noexcept { return data_; }
-  const T* operator->() const noexcept { return data_; }
+  auto operator->() noexcept -> T* { return data_; }
+  auto operator->() const noexcept -> const T* { return data_; }
 
-  [[nodiscard]] T& operator*() noexcept { *data_; }
-  [[nodiscard]] const T& operator*() const noexcept { *data_; }
+  [[nodiscard]] auto operator*() noexcept -> T& { return *data_; }
+  [[nodiscard]] auto operator*() const noexcept -> const T& { return *data_; }
 
-  [[nodiscard]] bool HasValue() const noexcept { return data_ != nullptr; }
+  [[nodiscard]] auto HasValue() const noexcept -> bool { return data_ != nullptr; }
 
-  [[nodiscard]] T& Value() {
+  [[nodiscard]] auto Value() -> T& {
     if (!HasValue()) {
       throw std::bad_optional_access{};
     }
@@ -82,7 +82,7 @@ struct OptionalReference {
     return (*data_);
   }
 
-  [[nodiscard]] const T& Value() const {
+  [[nodiscard]] auto Value() const -> const T& {
     if (!HasValue()) {
       throw std::bad_optional_access{};
     }
@@ -96,8 +96,7 @@ struct OptionalReference {
 
 template <typename T, typename C>
 concept MatchesComponent =
-    IsComponent<C> &&
-    std::same_as<GetTypeT<C>, std::remove_reference_t<std::remove_cv_t<T>>>;
+    IsComponent<C> && std::same_as<GetTypeT<C>, std::remove_cvref_t<T>>;
 
 template <IsComponent C>
 class EcsHelper {

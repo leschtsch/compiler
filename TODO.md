@@ -1,0 +1,3 @@
+- [ ] Add start and stop positions to each token
+- [ ] Lexer keywords: use string view to lookup in map (or change to trie?)
+- [ ] tests for utils/trie.hpp

@@ -1,3 +1,11 @@
+/**
+ * @file tokens.hpp
+ *
+ * @note although lexer can't distinguish between unary
+ * and binary operators, such as unary and binary minus, or multiplication and dereference
+ * they're declared twice.
+ * Lexer should prefer binary, parser may fix that.
+ */
 #pragma once
 
 #include <ecs/ecs.hpp>
@@ -10,9 +18,10 @@ struct BaseToken : ecs::Entity {};
 
 struct ErrorToken : public BaseToken {};
 struct EofToken : public BaseToken {};
-struct NopToken : public BaseToken {};
+struct IdToken : public BaseToken {};
 
-using MiscellaneousTuple = utils::TypeTuple<ErrorToken, EofToken, NopToken, BaseToken>;
+using MiscellaneousTuple =
+    utils::TypeTuple<ErrorToken, EofToken, IdToken, BaseToken>;
 //===========================^=MISCELLANEOUS=TOKENS=^===============================================
 
 //===========================V=UNARY=OPERATORS=V====================================================
@@ -60,11 +69,11 @@ using LiteralsTuple = utils::TypeTuple<Int, Float, String, Literal>;
 struct Keyword : public BaseToken {};
 
 #define KEYWORD(name) \
-  struct Keyword##name : public Keyword {};
+  struct Keyword_##name : public Keyword {};
 #include <language_data/keywords.dat>
 #undef KEYWORD
 
-#define KEYWORD(name) Keyword##name,
+#define KEYWORD(name) Keyword_##name,
 
 using KeywordsTuple = utils::TypeTuple<
 #include <language_data/keywords.dat>
@@ -73,11 +82,30 @@ using KeywordsTuple = utils::TypeTuple<
 #undef KEYWORD
 //===========================^=KEYWORDS=^===========================================================
 
+//===========================V=SYNTAX=TOKENS=V======================================================
+
+struct SyntaxToken : public BaseToken {};
+
+#define SYNT_TOKEN(name, x) \
+  struct Syntax##name : public SyntaxToken {};
+#include <language_data/synt_tokens.dat>
+#undef SYNT_TOKEN
+
+#define SYNT_TOKEN(name, x) Syntax##name,
+
+using SyntaxTokensTuple = utils::TypeTuple<
+#include <language_data/synt_tokens.dat>
+    SyntaxToken>;
+
+#undef SYNT_TOKEN
+//===========================^=SYNTAX=TOKENS=^======================================================
+
 //===========================V=ALL=TOKENS=V=========================================================
 using AllTokensTuple = utils::Concat<UnOperatorsTuple,
                                      BinOperatorsTuple,
                                      LiteralsTuple,
                                      KeywordsTuple,
+                                     SyntaxTokensTuple,
                                      MiscellaneousTuple>;
 //===========================^=ALL=TOKENS=^=========================================================
 }  // namespace lexer::tokens
