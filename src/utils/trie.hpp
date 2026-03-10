@@ -5,7 +5,6 @@
  */
 
 #include <cstdint>
-#include <cstdio>
 #include <format>
 #include <optional>
 #include <ostream>
@@ -30,8 +29,10 @@ class Trie {
       return value_.has_value();
     }
 
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): need exception
     auto Value() const -> const Val& { return value_.value(); }
     auto Value() -> Val& { return value_.value(); }
+    // NOLINTEND(bugprone-unchecked-optional-access): need exception
 
    private:
     std::unordered_map<Alphabet, Node> links_;

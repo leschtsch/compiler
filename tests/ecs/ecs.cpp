@@ -113,7 +113,7 @@ TEST(Ecs, OptionalAccess) {
   EXPECT_ANY_THROW(auto dummy = ecs::Get<C1>(entity1).Value());
 }
 
-int main() {
+auto main() -> int {
   testing::InitGoogleTest();
   return RUN_ALL_TESTS();
 }

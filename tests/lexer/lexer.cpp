@@ -7,8 +7,6 @@
 #include <gtest/gtest.h>
 #include <variant>
 
-#include "gtest/gtest.h"
-
 TEST(Empty, Empty) {
   std::string input;
   lexer::Lexer cur_lexer{input};
@@ -186,6 +184,21 @@ TEST(Nums, Float) {
 
   auto entity = std::get<lexer::tokens::Float>(tok);
   EXPECT_TRUE(std::abs(ecs::Get<lexer::FloatValue>(entity).Value() - 0x1.2p-3) <
+              1e-10);
+
+  tok = cur_lexer.NextToken();
+  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+}
+
+TEST(Nums, StartsWithDot) {
+  std::string input = " .1 ";
+  lexer::Lexer cur_lexer{input};
+
+  auto tok = cur_lexer.NextToken();
+  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Float>(tok));
+
+  auto entity = std::get<lexer::tokens::Float>(tok);
+  EXPECT_TRUE(std::abs(ecs::Get<lexer::FloatValue>(entity).Value() - .1) <
               1e-10);
 
   tok = cur_lexer.NextToken();

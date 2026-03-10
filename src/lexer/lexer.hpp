@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <expected>
 #include <string>
-#include <unordered_map>
 #include <variant>
 
 #include "tokens.hpp"
@@ -42,9 +41,10 @@ class Lexer {
   auto Getchr() -> char;
   auto SkipWs() -> bool;
 
-  void BuildKeywordsMap();
+  void BuildKeywords();
   void BuildOtherTokens();
 
+  // NOTE: before you can change it to view, you need to implement GetNumwithout strtoull
   std::string input_;
   utils::SourcePosition position_{};
   bool reading_string_{false};
@@ -53,8 +53,8 @@ class Lexer {
 
   using TokenCreator = TokenVariant (*)(const utils::SourcePosition& start,
                                         const utils::SourcePosition& stop);
-  std::unordered_map<std::string, TokenCreator> keywords_map_;
-  utils::Trie<char, TokenCreator> other_tokens_; 
+  utils::Trie<char, TokenCreator> keywords_;
+  utils::Trie<char, TokenCreator> other_tokens_;
 };
 
 }  // namespace lexer

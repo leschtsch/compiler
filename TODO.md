@@ -1,3 +1,3 @@
 - [ ] Add start and stop positions to each token
-- [ ] Lexer keywords: use string view to lookup in map (or change to trie?)
 - [ ] tests for utils/trie.hpp
+- [ ] clean lexer/lexer.cpp function to create token of type with positions set

@@ -4,8 +4,8 @@
 #include <ecs/used_components.hpp>
 #include <utils/trie.hpp>
 
+#include <algorithm>
 #include <array>
-#include <cassert>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +19,7 @@
 namespace lexer {
 
 Lexer::Lexer(std::string input) : input_(std::move(input)) {
-  BuildKeywordsMap();
+  BuildKeywords();
   BuildOtherTokens();
 }
 
@@ -66,7 +66,7 @@ auto Lexer::NextToken() -> Lexer::TokenVariant {
   }
 
   std::size_t next = position_.index + 1;
-  if (next >= input_.size() || std::isdigit(Getchr()) == 0) {
+  if (next >= input_.size() || std::isdigit(input_[next]) == 0) {
     return GetOther();
   }
 
@@ -287,21 +287,27 @@ auto Lexer::GetNum() -> TokenVariant {
 }
 
 auto Lexer::GetIdOrKeyword() -> TokenVariant {
+  auto chr = Getchr();
+  std::string accum_id(1, chr);
+  auto* node = keywords_.NextNode(chr);
+  NextPositionOnce();
+
   while (!AtEof() && (std::isalnum(Getchr()) != 0 || Getchr() == '_')) {
+    chr = Getchr();
+    accum_id += chr;
     NextPositionOnce();
+
+    if (node != nullptr) {
+      node = keywords_.NextNode(chr, node);
+    }
   }
 
-  std::size_t len = position_.index - start_position_.index;
-  // FIXME: need transparent hash
-  std::string name = std::string(input_.substr(start_position_.index, len));
-
-  auto found = keywords_map_.find(name);
-  if (found != keywords_map_.end()) {
-    return found->second(start_position_, position_);
+  if (node != nullptr && node->HasValue()) {
+    return node->Value()(start_position_, position_);
   }
 
   auto result = tokens::IdToken{};
-  ecs::Set<IdName>(result, std::string(name));
+  ecs::Set<IdName>(result, std::move(accum_id));
   ecs::Set<TokenStart>(result, start_position_);
   ecs::Set<TokenStop>(result, position_);
   return result;
@@ -378,12 +384,12 @@ auto Lexer::SkipWs() -> bool {
   return res;
 }
 
-void Lexer::BuildKeywordsMap() {
+void Lexer::BuildKeywords() {
 #define KEYWORD(name)                                            \
   {                                                              \
     using KwType = tokens::Keyword_##name;                       \
-    keywords_map_.emplace(                                       \
-        #name,                                                   \
+    keywords_.Insert(                                            \
+        std::string(#name),                                      \
         +[](const utils::SourcePosition& start,                  \
             const utils::SourcePosition& stop) -> TokenVariant { \
           auto res = KwType{};                                   \

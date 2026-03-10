@@ -15,7 +15,7 @@ struct TokenStop : public ecs::Component<utils::SourcePosition> {};
 struct ErrorMessage : public ecs::Component<std::string> {};
 
 struct StrValue : public ecs::Component<std::string> {};
-struct IntValue : public ecs::Component<std::uint64_t> {};
+struct IntValue : public ecs::Component<std::uintmax_t> {};
 struct FloatValue : public ecs::Component<long double> {};
 
 struct IdName : public ecs::Component<std::string> {};
