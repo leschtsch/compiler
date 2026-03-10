@@ -18,7 +18,7 @@
 
 namespace lexer {
 
-Lexer::Lexer(std::string input) : input_(std::move(input)) {
+Lexer::Lexer(const std::string& input) : input_(input) {
   BuildKeywords();
   BuildOtherTokens();
 }
@@ -138,9 +138,9 @@ auto Lexer::SkipCommentMultiLiner() -> std::expected<bool, tokens::ErrorToken> {
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<TokenStart>(error, start_position_);
-  ecs::Set<TokenStop>(error, position_);
-  ecs::Set<ErrorMessage>(error, std::string("comment not closed"));
+  ecs::Set<ecs::TokenStart>(error, start_position_);
+  ecs::Set<ecs::TokenStop>(error, position_);
+  ecs::Set<ecs::ErrorMessage>(error, std::string("comment not closed"));
   return std::unexpected(error);
 }
 
@@ -173,16 +173,16 @@ auto Lexer::GetString() -> TokenVariant {
   if (!AtEof()) {  // we're at '"'
     NextPositionOnce();
     auto result = tokens::String{};
-    ecs::Set<StrValue>(result, std::move(accumulated_string_));
-    ecs::Set<TokenStart>(result, start_position_);
-    ecs::Set<TokenStop>(result, position_);
+    ecs::Set<ecs::StrValue>(result, std::move(accumulated_string_));
+    ecs::Set<ecs::TokenStart>(result, start_position_);
+    ecs::Set<ecs::TokenStop>(result, position_);
     return result;
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<TokenStart>(error, start_position_);
-  ecs::Set<TokenStop>(error, position_);
-  ecs::Set<ErrorMessage>(error, std::string("string not terminated"));
+  ecs::Set<ecs::TokenStart>(error, start_position_);
+  ecs::Set<ecs::TokenStop>(error, position_);
+  ecs::Set<ecs::ErrorMessage>(error, std::string("string not terminated"));
   return error;
 }
 
@@ -191,9 +191,9 @@ auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 
   if (AtEof()) {
     auto error = tokens::ErrorToken{};
-    ecs::Set<TokenStart>(error, start_position_);
-    ecs::Set<TokenStop>(error, position_);
-    ecs::Set<ErrorMessage>(error, std::string("string not terminated"));
+    ecs::Set<ecs::TokenStart>(error, start_position_);
+    ecs::Set<ecs::TokenStop>(error, position_);
+    ecs::Set<ecs::ErrorMessage>(error, std::string("string not terminated"));
     return std::unexpected(error);
   }
 
@@ -226,8 +226,8 @@ auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 
     default: {
       auto error = tokens::ErrorToken{};
-      ecs::Set<TokenStop>(error, position_);
-      ecs::Set<ErrorMessage>(error, std::string("unknown escape sequence"));
+      ecs::Set<ecs::TokenStop>(error, position_);
+      ecs::Set<ecs::ErrorMessage>(error, std::string("unknown escape sequence"));
       return std::unexpected(error);
     }
   }
@@ -241,9 +241,9 @@ auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 
   if (next >= input_.size()) {
     auto error = tokens::ErrorToken{};
-    ecs::Set<TokenStart>(error, start_position_);
-    ecs::Set<TokenStop>(error, position_);
-    ecs::Set<ErrorMessage>(error, std::string("string not terminated"));
+    ecs::Set<ecs::TokenStart>(error, start_position_);
+    ecs::Set<ecs::TokenStop>(error, position_);
+    ecs::Set<ecs::ErrorMessage>(error, std::string("string not terminated"));
     return std::unexpected(error);
   }
 
@@ -256,13 +256,16 @@ auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<TokenStop>(error, position_);
-  ecs::Set<ErrorMessage>(error, std::string("unknown hex escape sequence"));
+  ecs::Set<ecs::TokenStop>(error, position_);
+  ecs::Set<ecs::ErrorMessage>(error, std::string("unknown hex escape sequence"));
   return std::unexpected(error);
 }
 
+/*
+ * hate strtoxx functions, thery're evil
+ */
 auto Lexer::GetNum() -> TokenVariant {
-  char* start = input_.data() + position_.index;
+  const char* start = input_.data() + position_.index;
   char* int_end = nullptr;
   char* float_end = nullptr;
 
@@ -273,16 +276,16 @@ auto Lexer::GetNum() -> TokenVariant {
 
   if (int_end == float_end) {
     tokens::Int result{};
-    ecs::Set<IntValue>(result, int_value);
-    ecs::Set<TokenStart>(result, start_position_);
-    ecs::Set<TokenStop>(result, position_);
+    ecs::Set<ecs::IntValue>(result, int_value);
+    ecs::Set<ecs::TokenStart>(result, start_position_);
+    ecs::Set<ecs::TokenStop>(result, position_);
     return result;
   }
 
   tokens::Float result{};
-  ecs::Set<FloatValue>(result, float_value);
-  ecs::Set<TokenStart>(result, start_position_);
-  ecs::Set<TokenStop>(result, position_);
+  ecs::Set<ecs::FloatValue>(result, float_value);
+  ecs::Set<ecs::TokenStart>(result, start_position_);
+  ecs::Set<ecs::TokenStop>(result, position_);
   return result;
 }
 
@@ -307,9 +310,9 @@ auto Lexer::GetIdOrKeyword() -> TokenVariant {
   }
 
   auto result = tokens::IdToken{};
-  ecs::Set<IdName>(result, std::move(accum_id));
-  ecs::Set<TokenStart>(result, start_position_);
-  ecs::Set<TokenStop>(result, position_);
+  ecs::Set<ecs::IdName>(result, std::move(accum_id));
+  ecs::Set<ecs::TokenStart>(result, start_position_);
+  ecs::Set<ecs::TokenStop>(result, position_);
   return result;
 }
 
@@ -342,9 +345,9 @@ auto Lexer::GetOther() -> TokenVariant {
   }
 
   auto error = tokens::ErrorToken{};
-  ecs::Set<TokenStart>(error, start_position_);
-  ecs::Set<TokenStop>(error, position_);
-  ecs::Set<ErrorMessage>(error, std::string("unexpected symbol"));
+  ecs::Set<ecs::TokenStart>(error, start_position_);
+  ecs::Set<ecs::TokenStop>(error, position_);
+  ecs::Set<ecs::ErrorMessage>(error, std::string("unexpected symbol"));
   return error;
 }
 
@@ -393,8 +396,8 @@ void Lexer::BuildKeywords() {
         +[](const utils::SourcePosition& start,                  \
             const utils::SourcePosition& stop) -> TokenVariant { \
           auto res = KwType{};                                   \
-          ecs::Set<TokenStart>(res, start);                      \
-          ecs::Set<TokenStop>(res, stop);                        \
+          ecs::Set<ecs::TokenStart>(res, start);                      \
+          ecs::Set<ecs::TokenStop>(res, stop);                        \
           return TokenVariant(res);                              \
         });                                                      \
   }
@@ -413,8 +416,8 @@ void Lexer::BuildOtherTokens() {
         +[](const utils::SourcePosition& start,                  \
             const utils::SourcePosition& stop) -> TokenVariant { \
           auto res = KwType{};                                   \
-          ecs::Set<TokenStart>(res, start);                      \
-          ecs::Set<TokenStop>(res, stop);                        \
+          ecs::Set<ecs::TokenStart>(res, start);                      \
+          ecs::Set<ecs::TokenStop>(res, stop);                        \
           return TokenVariant(res);                              \
         });                                                      \
   }

@@ -7,7 +7,7 @@
 
 #include "ecs.hpp"
 
-namespace lexer {
+namespace ecs {
 
 struct TokenStart : public ecs::Component<utils::SourcePosition> {};
 struct TokenStop : public ecs::Component<utils::SourcePosition> {};
@@ -20,4 +20,4 @@ struct FloatValue : public ecs::Component<long double> {};
 
 struct IdName : public ecs::Component<std::string> {};
 
-}  // namespace lexer
+}  // namespace ecs

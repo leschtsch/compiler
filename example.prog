@@ -1,0 +1,13 @@
+// I am trying to make parser parse it
+
+int foo(int x, int y) {
+  return (x + y) % 2 == 0;
+}
+
+int main() {
+  if (foo(1, 2) == 0) {
+    return 0;
+  } else {
+    return (1 + 2) *  (3 + /* error intentional */);
+  }
+}

@@ -18,7 +18,7 @@ class Lexer {
  public:
   using TokenVariant = utils::ConvertTo<tokens::AllTokensTuple, std::variant>;
 
-  explicit Lexer(std::string input);
+  explicit Lexer(const std::string& input);
 
   auto NextToken() -> TokenVariant;
 
@@ -45,7 +45,7 @@ class Lexer {
   void BuildOtherTokens();
 
   // NOTE: before you can change it to view, you need to implement GetNumwithout strtoull
-  std::string input_;
+  const std::string& input_;
   utils::SourcePosition position_{};
   bool reading_string_{false};
   std::string accumulated_string_;

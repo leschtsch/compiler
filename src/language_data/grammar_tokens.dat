@@ -1,1 +1,16 @@
 TOKEN(Program, BaseToken)
+TOKEN(ErrorToken, BaseToken)
+TOKEN(FunctionDefinition, BaseToken)
+TOKEN(TypeDeclaration, BaseToken)
+
+TOKEN(BasicType, BaseToken)
+TOKEN(KeywordChar, BasicType)
+TOKEN(KeywordInt, BasicType)
+TOKEN(KeywordUint, BasicType)
+TOKEN(KeywordFloat, BasicType)
+TOKEN(KeywordConst, BasicType)
+
+TOKEN(Name, BaseToken)
+TOKEN(IdToken, BaseToken)
+
+TOKEN(ParameterList, BaseToken)
