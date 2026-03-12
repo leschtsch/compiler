@@ -44,17 +44,19 @@ class Lexer {
   void BuildKeywords();
   void BuildOtherTokens();
 
-  // NOTE: before you can change it to view, you need to implement GetNumwithout strtoull
+  // NOTE: before you can change it to view, you need to implement GetNumwithout
+  // strtoull
   const std::string& input_;
   utils::SourcePosition position_{};
   bool reading_string_{false};
   std::string accumulated_string_;
   utils::SourcePosition start_position_;
 
-  using TokenCreator = TokenVariant (*)(const utils::SourcePosition& start,
-                                        const utils::SourcePosition& stop);
-  utils::Trie<char, TokenCreator> keywords_;
-  utils::Trie<char, TokenCreator> other_tokens_;
+  using TokenVariantCreator = TokenVariant (*)(
+      const utils::SourcePosition& start, const utils::SourcePosition& stop);
+
+  utils::Trie<char, TokenVariantCreator> keywords_;
+  utils::Trie<char, TokenVariantCreator> other_tokens_;
 };
 
 }  // namespace lexer

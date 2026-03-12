@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <ostream>
+#include <string>
 #include <variant>
 
 #include "ast.hpp"
@@ -14,34 +15,58 @@ namespace parser {
 
 namespace {
 
-template <typename T>
-void DumpNode(T /* tok */, const AstNode* node, std::ostream& ostr) = delete;
-
-template <>
-void DumpNode<tokens::BaseToken>(tokens::BaseToken tok,
-                                 const AstNode* node,
-                                 std::ostream& ostream) {
-  ostream << reinterpret_cast<std::uintptr_t>(node) << "[label = \""
-          << tokens::GetName(tok) << "\"];\n";
+//===========================V=HELPERS=V============================================================
+void DumpNodeOpen(std::ostream& ostream, const AstNode* node) {
+  ostream << reinterpret_cast<std::uintptr_t>(node) << "[ ";
 }
 
-#define TOKEN(Token, Parent)                                           \
-  template <>                                                          \
-  [[maybe_unused]] void DumpNode<tokens::Token>(                       \
-      tokens::Token tok, const AstNode* node, std::ostream& ostream) { \
-    ostream << reinterpret_cast<std::uintptr_t>(node) << "[label = \"" \
-            << tokens::GetName(tok) << "\"];\n";                       \
+void DumpNodeLabel(std::ostream& ostream, auto tok) {
+  ostream << "label = \"" << tokens::GetName(tok) << "\" ";
+}
+
+void DumpNodeLabel(std::ostream& ostream, const std::string& label) {
+  ostream << "label = \"" << label << "\" ";
+}
+
+void DumpNodeColor(std::ostream& ostream, const AstNode* node) {
+  if (node->has_error) {
+    ostream << "style=filled fillcolor=lightpink ";
   }
-
-#include <language_data/grammar_tokens.dat>
-
-#undef TOKEN
-
-void DumpNode(tokens::IdToken tok, const AstNode* node, std::ostream& ostream) {
-  ostream << reinterpret_cast<std::uintptr_t>(node) << "[label = \""
-          << tokens::GetName(tok) << "\\n"
-          << ecs::Get<ecs::IdName>(tok).Value() << "\"];\n";
 }
+
+void DumpNodeColor(std::ostream& ostream, const std::string& color) {
+  ostream << "style=filled fillcolor=" << color << " ";
+}
+
+void DumpNodeClose(std::ostream& ostream) { ostream << "];\n"; }
+
+//===========================^=HELPERS=^============================================================
+
+//===========================V=DUMP=OVERLOADS=V=====================================================
+void DumpNodeBody(std::ostream& ostream, auto tok, const AstNode* node) {
+  DumpNodeLabel(ostream, tok);
+  DumpNodeColor(ostream, node);
+}
+
+void DumpNodeBody(std::ostream& ostream,
+                  tokens::IdToken tok,
+                  const AstNode* node) {
+  DumpNodeLabel(
+      ostream,
+      tokens::GetName(tok) + "\\n" + ecs::Get<ecs::IdName>(tok).Value());
+
+  DumpNodeColor(ostream, node);
+}
+
+void DumpNodeBody(std::ostream& ostream,
+                  tokens::ErrorToken tok,
+                  const AstNode* /* node */) {
+  // TODO: escape sequences
+
+  DumpNodeLabel(ostream, ecs::Get<ecs::ErrorMessage>(tok).Value());
+  DumpNodeColor(ostream, "darkred");
+}
+//===========================^=DUMP=OVERLOADS=V=====================================================
 
 using FakeVariant = std::variant<const AstNode*>;
 
@@ -51,7 +76,10 @@ class Visitor {
       : ostream_(ostream), node_(node) {}
 
   void operator()(auto tok, const AstNode* node) {
-    DumpNode(tok, node, ostream_);
+    DumpNodeOpen(ostream_, node);
+    DumpNodeBody(ostream_, tok, node);
+    DumpNodeClose(ostream_);
+
     VisitChildren(node);
   }
 

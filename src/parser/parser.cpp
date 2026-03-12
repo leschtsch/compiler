@@ -12,124 +12,12 @@
 
 namespace parser {
 
-class Parser {
- public:
-  explicit Parser(const std::string& input);
-  auto Parse() -> AstNode;
-
- private:
-  auto ParseFunctionDefinition() -> AstNode;
-  auto ParseTypeDeclaration() -> AstNode;
-  auto ParseName() -> AstNode;
-  auto ParseParameterList() -> AstNode;
-
-  void NextToken();
-
-  template <typename T, utils::IsTypeTuple Tt>
-  static auto CreateTokenAndGrabAttributes(ecs::Entity entity) -> AstNode;
-
-  /*
-   * TODO
-   *
-   * may be probably used for some error recovery, but not yet
-   * also need to return positions of error, and produce meaningful messages...
-   */
-  template <typename... Tokens>
-  void SkipUntil();
-
-  lexer::Lexer lexer_;
-  lexer::Lexer::TokenVariant cur_token_;
-};
-
-Parser::Parser(const std::string& input)
-    : lexer_(input), cur_token_(lexer_.NextToken()) {};
-
-auto Parser::Parse() -> AstNode {
-  auto result = AstNode{.token = tokens::Program{}, .children = {}};
-
-  while (!std::holds_alternative<lexer::tokens::EofToken>(cur_token_)) {
-    result.children.push_back(ParseFunctionDefinition());
-  }
-
-  return result;
-}
-
-auto Parser::ParseFunctionDefinition() -> AstNode {
-  auto result = AstNode{.token = tokens::FunctionDefinition{}, .children = {}};
-
-  result.children.push_back(ParseTypeDeclaration());
-  SkipUntil<lexer::tokens::EofToken, lexer::tokens::IdToken>();
-
-  result.children.push_back(ParseName());
-  SkipUntil<lexer::tokens::EofToken, lexer::tokens::SyntaxLparent>();
-
-  result.children.push_back(ParseParameterList());
-  SkipUntil<lexer::tokens::EofToken, lexer::tokens::SyntaxLbrace>();
-
-  return result;
-}
-
-auto Parser::ParseTypeDeclaration() -> AstNode {
-  using Attrs = utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>;
-  auto result = AstNode{.token = tokens::TypeDeclaration{}, .children = {}};
-  auto tmp = std::visit(
-      utils::Overloaded{
-          [](auto tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::ErrorToken, Attrs>(tok);
-          },
-          [](lexer::tokens::Keyword_char tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::KeywordChar, Attrs>(
-                tok);
-          },
-          [](lexer::tokens::Keyword_int tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::KeywordInt, Attrs>(tok);
-          },
-          [](lexer::tokens::Keyword_uint tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::KeywordUint, Attrs>(
-                tok);
-          },
-          [](lexer::tokens::Keyword_float tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::KeywordFloat, Attrs>(
-                tok);
-          },
-      },
-      cur_token_);
-
-  result.children.push_back(std::move(tmp));
-  NextToken();
-  return result;
-}
-
-auto Parser::ParseName() -> AstNode {
-  using Attrs = utils::TypeTuple<ecs::TokenStart, ecs::TokenStop, ecs::IdName>;
-  auto result = AstNode{.token = tokens::Name{}, .children = {}};
-  auto tmp = std::visit(
-      utils::Overloaded{
-          [](auto tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::ErrorToken, Attrs>(tok);
-          },
-          [](lexer::tokens::IdToken tok) -> AstNode {
-            return CreateTokenAndGrabAttributes<tokens::IdToken, Attrs>(tok);
-          },
-      },
-      cur_token_);
-  result.children.push_back(std::move(tmp));
-  NextToken();
-  return result;
-}
-
-auto Parser::ParseParameterList() -> AstNode {
-  auto result = AstNode{.token = tokens::ParameterList{}, .children = {}};
-  NextToken();
-  return result;
-}
-
-void Parser::NextToken() { cur_token_ = lexer_.NextToken(); }
+namespace {
 
 template <typename T, utils::IsTypeTuple TT>
-auto Parser::CreateTokenAndGrabAttributes(ecs::Entity entity) -> AstNode {
+auto CreateNodeAndGrabAttributes(ecs::Entity entity) -> AstNode {
   auto tok = T{};
-  auto result = AstNode{.token = tok, .children = {}};
+  auto result = AstNode{.token = tok, .has_error = false, .children = {}};
 
   [&tok, &entity]<typename... Attrs>(utils::TypeTuple<Attrs...>) -> void {
     (
@@ -147,11 +35,151 @@ auto Parser::CreateTokenAndGrabAttributes(ecs::Entity entity) -> AstNode {
 
   return result;
 }
+
+template <utils::IsTypeTuple Attrs, utils::IsTypeTuple... Pairs>
+class ParserVisitorOne;
+
+template <utils::IsTypeTuple Attrs, typename T, typename U>
+class ParserVisitorOne<Attrs, utils::TypeTuple<T, U>> {
+ public:
+  auto operator()(T tok) -> AstNode {
+    return CreateNodeAndGrabAttributes<U, Attrs>(tok);
+  }
+};
+
+template <utils::IsTypeTuple Attrs, utils::IsTypeTuple... Pairs>
+class ParserVisitor : private ParserVisitorOne<Attrs, Pairs>... {
+ public:
+  explicit ParserVisitor(std::string err_msg) : err_msg_(std::move(err_msg)) {}
+
+  auto operator()(auto tok) -> AstNode {
+    AstNode res = CreateNodeAndGrabAttributes<tokens::ErrorToken, Attrs>(tok);
+    res.has_error = true;
+
+    auto entity = std::get<tokens::ErrorToken>(res.token);
+    ecs::Set<ecs::ErrorMessage>(entity, std::move(err_msg_));
+    return res;
+  }
+
+  using ParserVisitorOne<Attrs, Pairs>::operator()...;
+
+ private:
+  std::string err_msg_;
+};
+
+auto PushCheckErr(AstNode& parent, AstNode&& child) -> bool {
+  parent.has_error |= (child.has_error);
+  parent.children.push_back(std::move(child));
+
+  return !parent.has_error;
+}
+
+}  // namespace
+
+class Parser {
+ public:
+  explicit Parser(const std::string& input);
+  auto Parse() -> AstNode;
+
+ private:
+  auto ParseFunctionDefinition() -> AstNode;
+  auto ParseTypeDeclaration() -> AstNode;
+  auto ParseName() -> AstNode;
+  auto ParseParameterList() -> AstNode;
+
+  void NextToken();
+
+  template <typename... Tokens>
+  auto SkipUntil() -> bool;
+
+  lexer::Lexer lexer_;
+  lexer::Lexer::TokenVariant cur_token_;
+};
+
+Parser::Parser(const std::string& input)
+    : lexer_(input), cur_token_(lexer_.NextToken()) {};
+
+auto Parser::Parse() -> AstNode {
+  auto result =
+      AstNode{.token = tokens::Program{}, .has_error = false, .children = {}};
+
+  while (!std::holds_alternative<lexer::tokens::EofToken>(cur_token_)) {
+    PushCheckErr(result, ParseFunctionDefinition()) or
+        SkipUntil<lexer::tokens::EofToken,
+                  lexer::tokens::Keyword_char,
+                  lexer::tokens::Keyword_int,
+                  lexer::tokens::Keyword_uint,
+                  lexer::tokens::Keyword_float>();
+  }
+
+  return result;
+}
+
+auto Parser::ParseFunctionDefinition() -> AstNode {
+  auto result = AstNode{.token = tokens::FunctionDefinition{},
+                        .has_error = false,
+                        .children = {}};
+
+  PushCheckErr(result, ParseTypeDeclaration()) and
+      PushCheckErr(result, ParseName()) and
+      PushCheckErr(result, ParseParameterList());
+
+  return result;
+}
+
+auto Parser::ParseTypeDeclaration() -> AstNode {
+  auto result = AstNode{
+      .token = tokens::TypeDeclaration{}, .has_error = false, .children = {}};
+
+  ParserVisitor<
+      // Attrs
+      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
+      // Tokens
+      utils::TypeTuple<lexer::tokens::Keyword_char, tokens::KeywordChar>,
+      utils::TypeTuple<lexer::tokens::Keyword_int, tokens::KeywordInt>,
+      utils::TypeTuple<lexer::tokens::Keyword_uint, tokens::KeywordUint>,
+      utils::TypeTuple<lexer::tokens::Keyword_float, tokens::KeywordFloat>>
+      visitor("expected type");
+
+  auto tmp = std::visit(visitor, cur_token_);
+  PushCheckErr(result, std::move(tmp));
+  NextToken();
+  return result;
+}
+
+auto Parser::ParseName() -> AstNode {
+  auto result =
+      AstNode{.token = tokens::Name{}, .has_error = false, .children = {}};
+
+  ParserVisitor<
+      // Attrs
+      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop, ecs::IdName>,
+      // Tokens
+      utils::TypeTuple<lexer::tokens::IdToken, tokens::IdToken>>
+      visitor("expected id");
+
+  auto tmp = std::visit(visitor, cur_token_);
+  PushCheckErr(result, std::move(tmp));
+  NextToken();
+  return result;
+}
+
+auto Parser::ParseParameterList() -> AstNode {
+  auto result = AstNode{
+      .token = tokens::ParameterList{}, .has_error = false, .children = {}};
+
+  NextToken();
+  return result;
+}
+
+void Parser::NextToken() { cur_token_ = lexer_.NextToken(); }
+
 template <typename... Tokens>
-void Parser::SkipUntil() {
+auto Parser::SkipUntil() -> bool {
   while (!(std::holds_alternative<Tokens>(cur_token_) || ...)) {
     NextToken();
   }
+  return true;
 }
 
 auto Parse(const std::string& input) -> AstNode {

@@ -1,5 +1,4 @@
 - [ ] tests for utils/trie.hpp
-- [ ] clean lexer/lexer.cpp: function to create token of type with positions set
 - [ ] refactor lexer tokens into tree hierarchy (like grammar_tokens.dat) 
-- [ ] clean parser/parser.cpp: funtion that skips until one of type_tuple
 - [ ] print erorrs from parser and lexer
+
