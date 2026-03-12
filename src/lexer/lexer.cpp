@@ -2,6 +2,7 @@
 
 #include <ecs/ecs.hpp>
 #include <ecs/used_components.hpp>
+#include <utils/source_position.hpp>
 #include <utils/trie.hpp>
 
 #include <algorithm>
