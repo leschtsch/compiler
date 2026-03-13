@@ -16,7 +16,7 @@ struct AstNode {
   TokenVariant token;
 
   /// error happened somewhere down the tree, but we still know what this node should be
-  bool has_error;
+  bool has_active_error;
   std::vector<struct AstNode> children;
 };
 

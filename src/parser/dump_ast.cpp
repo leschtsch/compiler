@@ -29,7 +29,7 @@ void DumpNodeLabel(std::ostream& ostream, const std::string& label) {
 }
 
 void DumpNodeColor(std::ostream& ostream, const AstNode* node) {
-  if (node->has_error) {
+  if (node->has_active_error) {
     ostream << "style=filled fillcolor=lightpink ";
   }
 }
