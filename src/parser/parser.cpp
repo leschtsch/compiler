@@ -90,6 +90,7 @@ class Parser {
   auto ParseName() -> AstNode;
   auto ParseParameterList() -> AstNode;
   auto ParseParameterDecl() -> AstNode;
+  auto ParseBlockStatement() -> AstNode;
 
   void NextToken();
 
@@ -113,7 +114,7 @@ auto Parser::Parse() -> AstNode {
   auto result = AstNode{
       .token = tokens::Program{}, .has_active_error = false, .children = {}};
 
-  while (!std::holds_alternative<lexer::tokens::EofToken>(cur_token_)) {
+  while (!Lookup<lexer::tokens::EofToken>()) {
     bool success = PushCheckErr(result, ParseFunctionDefinition()) or
                    SkipUntil<lexer::tokens::Keyword_char,
                              lexer::tokens::Keyword_int,
@@ -132,7 +133,8 @@ auto Parser::ParseFunctionDefinition() -> AstNode {
 
   bool success = PushCheckErr(result, ParseTypeDeclaration()) and
                  PushCheckErr(result, ParseName()) and
-                 PushCheckErr(result, ParseParameterList());
+                 PushCheckErr(result, ParseParameterList()) and
+                 PushCheckErr(result, ParseBlockStatement());
   result.has_active_error |= !success;
 
   return result;
@@ -221,6 +223,19 @@ auto Parser::ParseParameterDecl() -> AstNode {
   return result;
 }
 
+auto Parser::ParseBlockStatement() -> AstNode {
+  auto result = AstNode{.token = tokens::BlockStatement{},
+                        .has_active_error = false,
+                        .children = {}};
+
+  bool success = Consume<lexer::tokens::SyntaxLbrace>() &&
+                 Consume<lexer::tokens::SyntaxRbrace>();
+  result.has_active_error &= !success;
+
+  return result;
+}
+
+//TODO token_iterator++
 void Parser::NextToken() { cur_token_ = lexer_.NextToken(); }
 
 template <typename... Tokens>

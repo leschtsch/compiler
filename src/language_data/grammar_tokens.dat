@@ -15,3 +15,5 @@ TOKEN(IdToken, BaseToken)
 
 TOKEN(ParameterList, BaseToken)
 TOKEN(ParameterDecl, BaseToken)
+
+TOKEN(BlockStatement, BaseToken)
