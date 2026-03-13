@@ -1,10 +1,11 @@
-**build**
 **.swp
 **.swo
 **output**
-**bin**
-**coverage**
-**docs**
+
+build/**
+bin/**
+coverage/**
+docs/**
 **.log**
 
 !scripts/coverage.sh
