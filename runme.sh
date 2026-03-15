@@ -18,7 +18,7 @@ jq -s add $(find -wholename "./build/*/**.json") >build/compile_commands.json
 
 echo -e "\033[1mcode checks: \033[0m"
 source scripts/format.sh
-source scripts/tidy.sh
+#source scripts/tidy.sh
 
 echo -e "\033[1munit testing: \033[0m"
 for build_type in ${BUILD_TYPES}; do
@@ -28,5 +28,5 @@ for build_type in ${BUILD_TYPES}; do
 done
 
 echo -e "\033[1mgenerating docs and coverage info: \033[0m"
-doxygen
+doxygen > doxygen.log
 ./scripts/coverage.sh

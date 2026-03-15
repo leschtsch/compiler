@@ -1,0 +1,5 @@
+ADD_SUBDIRECTORY(lexer)
+ADD_SUBDIRECTORY(parser)
+
+ADD_EXECUTABLE(main main.cpp)
+TARGET_LINK_LIBRARIES(main PRIVATE parser dump_ast)

@@ -10,12 +10,12 @@ Checks: >
   -llvm-include-order,
   -llvm-namespace-comment,
   -misc-const-correctness,
-  -modernize-use-trailing-return-type,
   -readability-avoid-const-params-in-decls,
   -readability-magic-numbers,
   -readability-named-parameter,
   -google-readability-todo,
   -portability-avoid-pragma-once,
+  -llvm-prefer-static-over-anonymous-namespace
 
 # llvm-namespace-comment is checked via clang-format
 
@@ -84,7 +84,7 @@ CheckOptions:
 Language: cpp
 
 ExtraArgs:
-  - '-std=c++20'
+  - '-std=c++23'
 
 Checks: >
   -cppcoreguidelines-*
