@@ -39,7 +39,7 @@ auto CreateTokenVariant(const utils::SourcePosition& start,
 
 }  // namespace
 
-Lexer::Lexer(const std::string& input) : input_(input) {
+Lexer::Lexer(std::string input) : input_(std::move(input)) {
   BuildKeywords();
   BuildOtherTokens();
 }

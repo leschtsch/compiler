@@ -16,6 +16,7 @@
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "ast.hpp"
 
@@ -90,7 +91,7 @@ auto PushCheckErr(AstNode& parent, AstNode&& child) -> bool {
 
 class Parser {
  public:
-  explicit Parser(const std::string& input);
+  explicit Parser(std::vector<lexer::Lexer::TokenVariant> input);
   auto Parse() -> AstNode;
 
  private:
@@ -133,12 +134,13 @@ class Parser {
   template <typename... Tokens>
   auto Lookup() -> bool;
 
-  lexer::Lexer lexer_;
+  std::vector<lexer::Lexer::TokenVariant> input_;
   lexer::Lexer::TokenVariant cur_token_;
+  std::size_t next_token_index_{1};
 };
 
-Parser::Parser(const std::string& input)
-    : lexer_(input), cur_token_(lexer_.NextToken()) {};
+Parser::Parser(std::vector<lexer::Lexer::TokenVariant> input)
+    : input_(std::move(input)), cur_token_(input_[0]){};
 
 auto Parser::Parse() -> AstNode {
   auto result = AstNode{
@@ -661,8 +663,13 @@ auto Parser::ParseLiteral() -> AstNode {
   return res;
 }
 
-// TODO token_iterator++
-void Parser::NextToken() { cur_token_ = lexer_.NextToken(); }
+void Parser::NextToken() { 
+  if (next_token_index_ == input_.size())
+  {
+    return;
+  }
+
+  cur_token_ = input_[next_token_index_++]; }
 
 template <typename... Tokens>
 auto Parser::SkipUntil() -> bool {
@@ -696,8 +703,8 @@ auto Parser::Lookup() -> bool {
   return static_cast<bool>((std::holds_alternative<Tokens>(cur_token_) || ...));
 }
 
-auto Parse(const std::string& input) -> AstNode {
-  Parser parser(input);
+auto Parse(std::vector<lexer::Lexer::TokenVariant> input) -> AstNode{
+  Parser parser(std::move(input));
   return parser.Parse();
 }
 

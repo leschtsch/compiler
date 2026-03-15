@@ -1,11 +1,13 @@
 #pragma once
 
-#include <string>
+#include <lexer/lexer.hpp>
+
+#include <vector>
 
 #include "ast.hpp"
 
 namespace parser {
 
-auto Parse(const std::string& input) -> AstNode;
+auto Parse(std::vector<lexer::Lexer::TokenVariant> input) -> AstNode;
 
 };
