@@ -66,6 +66,34 @@ void DumpNodeBody(std::ostream& ostream,
   DumpNodeLabel(ostream, ecs::Get<ecs::ErrorMessage>(tok).Value());
   DumpNodeColor(ostream, "darkred");
 }
+
+void DumpNodeBody(std::ostream& ostream,
+                  tokens::IntLiteral tok,
+                  const AstNode* /* node */) {
+
+  DumpNodeLabel(ostream,
+                tokens::GetName(tok) + "\\n" +
+                    std::to_string(ecs::Get<ecs::IntValue>(tok).Value()));
+}
+
+void DumpNodeBody(std::ostream& ostream,
+                  tokens::FloatLiteral tok,
+                  const AstNode* /* node */) {
+
+  DumpNodeLabel(ostream,
+                tokens::GetName(tok) + "\\n" +
+                    std::to_string(ecs::Get<ecs::FloatValue>(tok).Value()));
+}
+
+void DumpNodeBody(std::ostream& ostream,
+                  tokens::StrLiteral tok,
+                  const AstNode* /* node */) {
+
+  // TODO: escape sequences
+  DumpNodeLabel(
+      ostream,
+      tokens::GetName(tok) + "\\n" + ecs::Get<ecs::StrValue>(tok).Value());
+}
 //===========================^=DUMP=OVERLOADS=V=====================================================
 
 using FakeVariant = std::variant<const AstNode*>;

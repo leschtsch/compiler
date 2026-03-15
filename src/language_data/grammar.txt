@@ -1,0 +1,37 @@
+(*
+Synchronization: "}", ";", ")"
+*)
+
+Program ::= {FunctionDefinition}.
+FunctionDefinition ::= TypeDeclaration, Name, ParameterList, BlockStatement.
+TypeDeclaration ::= "char" | "int" | "uint" | "float".
+Name ::= ?ID?
+ParameterList ::= "(", [ ParameterDecl, {",", ParameterDecl} ], ")".
+ParameterDecl ::= TypeDeclaration, Name.
+BlockStatement ::= "{", { Statement }, "}".
+Statement ::= VariableDefinition |
+              IfStatement |
+              WhileStatement |
+              ReturnStatement |
+              AssingmentOrCall
+VariableDefinition ::= TypeDeclaration, Name, "=", Expression, ";".
+IfStatement ::= "if", Expression, BlockStatement, [ ElseStatement ].
+!ElseStatement ::= "else", ( IfStatement | BlockStatement ).
+WhileStatement ::= "while", Expression, BlockStatement.
+ReturnStatement ::= "return", [ Expression ], ";".
+!AssingmentOrCall ::= Locator, ( CallSuffix | AssignmentSuffix ), ";".
+!CallSuffix ::= "(", [ Expression, {",", Expression} ] ")".
+!AssignmentSuffix ::= "=", Expression.
+
+Locator ::= ?ID?
+
+Expression ::= LogicalExpr.
+LogicalExpr ::= ComparExpr, { ( "&&" | "||" ), ComparExpr }.
+ComparExpr ::= AddExpr, { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ), AddExpr }.
+AddExpr ::= MulExpr, { ( "+" | "-" ), MulExpr }.
+MulExpr ::= UnaryExpr, { ( "*" | "/" | "%" ), UnaryExpr }.
+UnaryExpr ::= LogNotExpr | PrimaryExpr.
+LogNotExpr ::= "!", PrimaryExpr.
+PrimaryExpr ::= LocatorOrCall | ?LITERAL? | ( "(", Expression, ")" ).
+!LocatorOrCall ::= Locator, [ CallSuffix ].
+
