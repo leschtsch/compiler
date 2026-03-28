@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include "lexer/lexer.hpp"
 #include "lexer/tokens.hpp"

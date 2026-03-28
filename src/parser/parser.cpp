@@ -13,6 +13,7 @@
 #include <lexer/tokens.hpp>
 #include <utils/type_tuple.hpp>
 
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <variant>
@@ -140,7 +141,7 @@ class Parser {
 };
 
 Parser::Parser(std::vector<lexer::Lexer::TokenVariant> input)
-    : input_(std::move(input)), cur_token_(input_[0]){};
+    : input_(std::move(input)), cur_token_(input_[0]) {};
 
 auto Parser::Parse() -> AstNode {
   auto result = AstNode{
@@ -663,13 +664,13 @@ auto Parser::ParseLiteral() -> AstNode {
   return res;
 }
 
-void Parser::NextToken() { 
-  if (next_token_index_ == input_.size())
-  {
+void Parser::NextToken() {
+  if (next_token_index_ == input_.size()) {
     return;
   }
 
-  cur_token_ = input_[next_token_index_++]; }
+  cur_token_ = input_[next_token_index_++];
+}
 
 template <typename... Tokens>
 auto Parser::SkipUntil() -> bool {
@@ -703,7 +704,7 @@ auto Parser::Lookup() -> bool {
   return static_cast<bool>((std::holds_alternative<Tokens>(cur_token_) || ...));
 }
 
-auto Parse(std::vector<lexer::Lexer::TokenVariant> input) -> AstNode{
+auto Parse(std::vector<lexer::Lexer::TokenVariant> input) -> AstNode {
   Parser parser(std::move(input));
   return parser.Parse();
 }
