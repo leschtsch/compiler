@@ -168,7 +168,7 @@ auto Parser::ParseFunctionDefinition() -> AstNode {
                  PushCheckErr(result, ParseName()) and
                  PushCheckErr(result, ParseParameterList()) and
                  PushCheckErr(result, ParseBlockStatement());
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   return result;
 }
@@ -191,7 +191,7 @@ auto Parser::ParseTypeDeclaration() -> AstNode {
   auto tmp = std::visit(visitor, cur_token_);
 
   bool success = PushCheckErr(result, std::move(tmp));
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   NextToken();
   return result;
@@ -212,7 +212,7 @@ auto Parser::ParseName() -> AstNode {
 
   bool success = PushCheckErr(result, std::move(tmp));
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   NextToken();
   return result;
@@ -239,7 +239,7 @@ auto Parser::ParseParameterList() -> AstNode {
 
   success &= Consume<lexer::tokens::SyntaxRparent>();
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   return result;
 }
@@ -252,64 +252,101 @@ auto Parser::ParseParameterDecl() -> AstNode {
   bool success = PushCheckErr(result, ParseTypeDeclaration()) and
                  PushCheckErr(result, ParseName());
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   return result;
 }
 
 auto Parser::ParseBlockStatement() -> AstNode {
-  auto result = AstNode{.token = tokens::BlockStatement{},
-                        .has_active_error = false,
-                        .children = {}};
-
   bool success = Consume<lexer::tokens::SyntaxLbrace>();
+  std::vector<AstNode> stmts;
 
   while (success && !Lookup<lexer::tokens::SyntaxRbrace>()) {
-    success &= PushCheckErr(result, ParseStatement()) or
-               SkipUntil<lexer::tokens::SyntaxRbrace>();
+    stmts.push_back(ParseStatement());
+    success &= !stmts.back().has_active_error;
+
+    if (!success) {
+      success |= SkipUntil<lexer::tokens::SyntaxRbrace>();
+    }
   }
 
   success &= Consume<lexer::tokens::SyntaxRbrace>();
 
-  result.has_active_error |= !success;
+  if (stmts.size() == 1) {
+    auto result = std::move(stmts.back());
+
+    result.has_active_error = !success;
+    return result;
+  }
+
+  auto result = AstNode{.token = tokens::BlockStatement{},
+                        .has_active_error = !success,
+                        .children = std::move(stmts)};
 
   return result;
 }
 
 auto Parser::ParseStatement() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::Statement{}, .has_active_error = false, .children = {}};
+  if (Lookup<lexer::tokens::Keyword_if>()) {
+    return ParseIfStatement();
+  }
 
-  bool success = true;
+  if (Lookup<lexer::tokens::Keyword_while>()) {
+    return ParseWhileStatement();
+  }
+
+  if (Lookup<lexer::tokens::Keyword_return>()) {
+    auto result = ParseReturnStatement();
+    bool success = !result.has_active_error;
+
+    if (!success) {
+      success = SkipUntil<lexer::tokens::SyntaxSemicolon,
+                          lexer::tokens::SyntaxRbrace>() and
+                Consume<lexer::tokens::SyntaxSemicolon>();
+    }
+
+    result.has_active_error = !success;
+    return result;
+  }
 
   if (Lookup<lexer::tokens::Keyword_char,
              lexer::tokens::Keyword_int,
              lexer::tokens::Keyword_uint,
              lexer::tokens::Keyword_float>()) {
-    success &= PushCheckErr(result, ParseVariableDefinition()) or
-               (SkipUntil<lexer::tokens::SyntaxSemicolon,
+
+    auto result = ParseVariableDefinition();
+    bool success = !result.has_active_error;
+
+    if (!success) {
+      success = SkipUntil<lexer::tokens::SyntaxSemicolon,
                           lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxSemicolon>());
-  } else if (Lookup<lexer::tokens::Keyword_if>()) {
-    success &= PushCheckErr(result, ParseIfStatement());
-  } else if (Lookup<lexer::tokens::Keyword_while>()) {
-    success &= PushCheckErr(result, ParseWhileStatement());
-  } else if (Lookup<lexer::tokens::Keyword_return>()) {
-    success &= PushCheckErr(result, ParseReturnStatement()) or
-               (SkipUntil<lexer::tokens::SyntaxSemicolon,
-                          lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxSemicolon>());
-  } else if (Lookup<lexer::tokens::IdToken>()) {
-    success &= PushCheckErr(result, ParseAssignmentOrCall()) or
-               (SkipUntil<lexer::tokens::SyntaxSemicolon,
-                          lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxSemicolon>());
-  } else {
-    success &= false;
-    NextToken();
+                Consume<lexer::tokens::SyntaxSemicolon>();
+    }
+
+    result.has_active_error = !success;
+    return result;
   }
 
-  result.has_active_error |= !success;
+  if (Lookup<lexer::tokens::IdToken>()) {
+    auto result = ParseAssignmentOrCall();
+    bool success = !result.has_active_error;
+
+    if (!success) {
+      success = SkipUntil<lexer::tokens::SyntaxSemicolon,
+                          lexer::tokens::SyntaxRbrace>() and
+                Consume<lexer::tokens::SyntaxSemicolon>();
+    }
+
+    result.has_active_error = !success;
+    return result;
+  }
+
+  auto tok = tokens::ErrorToken{};
+  auto result = AstNode{.token = tok, .has_active_error = true, .children = {}};
+  ecs::Set<ecs::ErrorMessage>(tok, std::string("expected statement"));
+
+  NextToken();
+
   return result;
 }
 
@@ -324,7 +361,7 @@ auto Parser::ParseVariableDefinition() -> AstNode {
                  PushCheckErr(result, ParseExpression()) and
                  Consume<lexer::tokens::SyntaxSemicolon>();
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
@@ -347,7 +384,7 @@ auto Parser::ParseIfStatement() -> AstNode {
     }
   }
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
@@ -360,7 +397,7 @@ auto Parser::ParseWhileStatement() -> AstNode {
                  PushCheckErr(result, ParseExpression()) and
                  PushCheckErr(result, ParseBlockStatement());
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
@@ -377,7 +414,7 @@ auto Parser::ParseReturnStatement() -> AstNode {
 
   success &= Consume<lexer::tokens::SyntaxSemicolon>();
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
@@ -400,7 +437,7 @@ auto Parser::ParseAssignment(AstNode locator) -> AstNode {
                  PushCheckErr(result, ParseExpression()) and
                  Consume<lexer::tokens::SyntaxSemicolon>();
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
@@ -413,7 +450,7 @@ auto Parser::ParseCallStatement(AstNode locator) -> AstNode {
                  ParseCallSuffix(result) and
                  Consume<lexer::tokens::SyntaxSemicolon>();
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   return result;
 }
@@ -433,7 +470,7 @@ auto Parser::ParseLocator() -> AstNode {
 
   bool success = PushCheckErr(result, std::move(tmp));
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
 
   NextToken();
   return result;
@@ -442,9 +479,6 @@ auto Parser::ParseLocator() -> AstNode {
 auto Parser::ParseExpression() -> AstNode { return ParseLogExpr(); }
 
 auto Parser::ParseLogExpr() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::LogExpr{}, .has_active_error = false, .children = {}};
-
   ParserVisitor<
       // Attrs
       utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
@@ -453,22 +487,23 @@ auto Parser::ParseLogExpr() -> AstNode {
       utils::TypeTuple<lexer::tokens::BinLogicalOr, tokens::LogOr>>
       visitor("expected && or ||");
 
-  bool success = PushCheckErr(result, ParseComparExpr());
+  auto last_node = ParseComparExpr();
+  bool success = !last_node.has_active_error;
+
   while (success &&
          Lookup<lexer::tokens::BinLogicalAnd, lexer::tokens::BinLogicalOr>()) {
-    success &= PushCheckErr(result, std::visit(visitor, cur_token_));
+    auto tmp = std::visit(visitor, cur_token_);
+    tmp.children.push_back(std::move(last_node));
+    last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(result, ParseComparExpr());
+    success &= PushCheckErr(last_node, ParseComparExpr());
   }
 
-  result.has_active_error |= !success;
-  return result;
+  last_node.has_active_error = !success;
+  return last_node;
 }
 
 auto Parser::ParseComparExpr() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::ComparExpr{}, .has_active_error = false, .children = {}};
-
   ParserVisitor<
       // Attrs
       utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
@@ -481,26 +516,27 @@ auto Parser::ParseComparExpr() -> AstNode {
       utils::TypeTuple<lexer::tokens::BinGeq, tokens::BinGeq>>
       visitor("expected comparison operator");
 
-  bool success = PushCheckErr(result, ParseAddExpr());
+  auto last_node = ParseAddExpr();
+  bool success = !last_node.has_active_error;
+
   while (success && Lookup<lexer::tokens::BinEq,
                            lexer::tokens::BinNeq,
                            lexer::tokens::BinLt,
                            lexer::tokens::BinLeq,
                            lexer::tokens::BinGt,
                            lexer::tokens::BinGeq>()) {
-    success &= PushCheckErr(result, std::visit(visitor, cur_token_));
+    auto tmp = std::visit(visitor, cur_token_);
+    tmp.children.push_back(std::move(last_node));
+    last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(result, ParseAddExpr());
+    success &= PushCheckErr(last_node, ParseAddExpr());
   }
 
-  result.has_active_error |= !success;
-  return result;
+  last_node.has_active_error = !success;
+  return last_node;
 }
 
 auto Parser::ParseAddExpr() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::AddExpr{}, .has_active_error = false, .children = {}};
-
   ParserVisitor<
       // Attrs
       utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
@@ -509,21 +545,22 @@ auto Parser::ParseAddExpr() -> AstNode {
       utils::TypeTuple<lexer::tokens::BinMinus, tokens::BinMinus>>
       visitor("expected + or -");
 
-  bool success = PushCheckErr(result, ParseMulExpr());
+  auto last_node = ParseMulExpr();
+  bool success = !last_node.has_active_error;
+
   while (success && Lookup<lexer::tokens::BinPlus, lexer::tokens::BinMinus>()) {
-    success &= PushCheckErr(result, std::visit(visitor, cur_token_));
+    auto tmp = std::visit(visitor, cur_token_);
+    tmp.children.push_back(std::move(last_node));
+    last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(result, ParseMulExpr());
+    success &= PushCheckErr(last_node, ParseMulExpr());
   }
 
-  result.has_active_error |= !success;
-  return result;
+  last_node.has_active_error = !success;
+  return last_node;
 }
 
 auto Parser::ParseMulExpr() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::MulExpr{}, .has_active_error = false, .children = {}};
-
   ParserVisitor<
       // Attrs
       utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
@@ -533,33 +570,29 @@ auto Parser::ParseMulExpr() -> AstNode {
       utils::TypeTuple<lexer::tokens::BinMod, tokens::BinMod>>
       visitor("expected *, / or %");
 
-  bool success = PushCheckErr(result, ParseUnaryExpr());
+  auto last_node = ParseUnaryExpr();
+  bool success = !last_node.has_active_error;
+
   while (success && Lookup<lexer::tokens::BinMul,
                            lexer::tokens::BinDiv,
                            lexer::tokens::BinMod>()) {
-    success &= PushCheckErr(result, std::visit(visitor, cur_token_));
+    auto tmp = std::visit(visitor, cur_token_);
+    tmp.children.push_back(std::move(last_node));
+    last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(result, ParseUnaryExpr());
+    success &= PushCheckErr(last_node, ParseUnaryExpr());
   }
 
-  result.has_active_error |= !success;
-  return result;
+  last_node.has_active_error = !success;
+  return last_node;
 }
 
 auto Parser::ParseUnaryExpr() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::UnaryExpr{}, .has_active_error = false, .children = {}};
-
-  bool success = true;
-
   if (Lookup<lexer::tokens::UnLogicalNot>()) {
-    success = PushCheckErr(result, ParseLogNotExpr());
-  } else {
-    success = PushCheckErr(result, ParsePrimaryExpr());
+    return ParseLogNotExpr();
   }
 
-  result.has_active_error |= !success;
-  return result;
+  return ParsePrimaryExpr();
 }
 
 auto Parser::ParseLogNotExpr() -> AstNode {
@@ -569,39 +602,37 @@ auto Parser::ParseLogNotExpr() -> AstNode {
   bool success = Consume<lexer::tokens::UnLogicalNot>() and
                  PushCheckErr(result, ParsePrimaryExpr());
 
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
 auto Parser::ParsePrimaryExpr() -> AstNode {
-  auto result = AstNode{.token = tokens::PrimaryExpr{},
-                        .has_active_error = false,
-                        .children = {}};
-
-  bool success = true;
-
   if (Lookup<lexer::tokens::SyntaxLparent>()) {
-    // clang-format off
-    success = (
-                Consume<lexer::tokens::SyntaxLparent>() and
-                PushCheckErr(result, ParseExpression()) and
-                Consume<lexer::tokens::SyntaxRparent>()
-              ) or (
-                SkipUntil<lexer::tokens::SyntaxRparent,
-                         lexer::tokens::SyntaxSemicolon,
-                         lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxRparent>()
-              );
-    // clang-format on
+    Consume<lexer::tokens::SyntaxLparent>();
 
-  } else if (Lookup<lexer::tokens::IdToken>()) {
-    success = PushCheckErr(result, ParseLocatorOrCall());
-  } else {
-    success = PushCheckErr(result, ParseLiteral());
+    auto result = ParseExpression();
+    bool success = !result.has_active_error;
+
+    if (success) {
+      success &= Consume<lexer::tokens::SyntaxRparent>();
+    }
+
+    if (!success) {
+      success = SkipUntil<lexer::tokens::SyntaxRparent,
+                          lexer::tokens::SyntaxSemicolon,
+                          lexer::tokens::SyntaxRbrace>() and
+                Consume<lexer::tokens::SyntaxRparent>();
+    }
+
+    result.has_active_error = !success;
+    return result;
   }
 
-  result.has_active_error |= !success;
-  return result;
+  if (Lookup<lexer::tokens::IdToken>()) {
+    return ParseLocatorOrCall();
+  }
+
+  return ParseLiteral();
 }
 
 auto Parser::ParseLocatorOrCall() -> AstNode {
@@ -617,7 +648,7 @@ auto Parser::ParseLocatorOrCall() -> AstNode {
 
   bool success =
       PushCheckErr(result, std::move(locator)) and ParseCallSuffix(result);
-  result.has_active_error |= !success;
+  result.has_active_error = !success;
   return result;
 }
 
