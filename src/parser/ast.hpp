@@ -11,7 +11,7 @@
 #include <variant>
 #include <vector>
 
-namespace parserv2::nodes {
+namespace parser::nodes {
 
 //===========================V=FORwARDS=V===========================================================
 class BaseNode;
@@ -171,4 +171,4 @@ template <std::size_t n_children>
 
 //===========================^=NAMES=^==============================================================
 
-}  // namespace parserv2::nodes
+}  // namespace parser::nodes

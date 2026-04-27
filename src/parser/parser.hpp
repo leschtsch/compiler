@@ -6,9 +6,9 @@
 
 #include "ast.hpp"
 
-namespace parserv2 {
+namespace parser {
 
 // will hold Program*
-[[nodiscard]] nodes::NodesVariant Parse(std::vector<lexerv2::Token> input);
+[[nodiscard]] nodes::NodesVariant Parse(std::vector<lexer::Token> input);
 
 };

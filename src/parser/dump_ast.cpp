@@ -10,7 +10,7 @@
 
 #include "ast.hpp"
 
-namespace parserv2 {
+namespace parser {
 
 namespace {
 
@@ -130,4 +130,4 @@ void DumpAst(std::ostream& ostream, const nodes::NodesVariant& node) {
   ostream << "}\n";
 }
 
-}  // namespace parserv2
+}  // namespace parser

@@ -17,7 +17,7 @@
 
 #include "tokens.hpp"
 
-namespace lexerv2 {
+namespace lexer {
 
 namespace {
 
@@ -420,4 +420,4 @@ bool Lexer::SkipWs() {
   return res;
 }
 
-}  // namespace lexerv2
+}  // namespace lexer

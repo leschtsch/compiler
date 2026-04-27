@@ -4,8 +4,8 @@
 
 #include "ast.hpp"
 
-namespace parserv2 {
+namespace parser {
 
 void DumpAst(std::ostream& ostream, const nodes::NodesVariant& node);
 
-}  // namespace parserv2
+}  // namespace parser

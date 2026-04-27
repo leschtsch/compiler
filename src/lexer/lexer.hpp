@@ -10,7 +10,7 @@
 
 #include "tokens.hpp"
 
-namespace lexerv2 {
+namespace lexer {
 
 class Lexer {
  public:
@@ -53,4 +53,4 @@ class Lexer {
   utils::Trie<char, TokenType> other_tokens_;
 };
 
-}  // namespace lexerv2
+}  // namespace lexer

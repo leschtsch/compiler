@@ -24,9 +24,11 @@
 
 // NOLINTBEGIN(misc-no-recursion)
 
-namespace parserv2 {
+namespace parser {
 
 namespace {
+
+//===========================V=HELPERS=V============================================================
 
 [[nodiscard]] bool IsHealthy(const nodes::NodesVariant& node) {
   auto visitor = [](const auto& ptr) -> bool { return ptr->Healthy(); };
@@ -39,18 +41,19 @@ bool StoreCheckErr(nodes::NodesVariant& store, nodes::NodesVariant&& child) {
   return is_healthy;
 }
 
-template <std::size_t n>
-bool StoreChild(nodes::NodesVariant& parent, nodes::NodesVariant&& child) {
+bool StoreChild(nodes::NodesVariant& parent,
+                nodes::NodesVariant&& child,
+                std::size_t idx) {
   bool success = IsHealthy(child);
 
   auto visitor = utils::Overloaded{
       [](nodes::BaseNode*) -> void {
         throw std::runtime_error("setting child of empty node");
       },
-      [&child]<std::size_t n_children>(nodes::NaryNode<n_children>* ptr)
-          -> void { ptr->Children()[n] = std::move(child); },
-      [&child](nodes::ArbitraryNode* ptr) -> void {
-        ptr->Children()[n] = std::move(child);
+      [&child, idx]<std::size_t n_children>(nodes::NaryNode<n_children>* ptr)
+          -> void { ptr->Children()[idx] = std::move(child); },
+      [&child, idx](nodes::ArbitraryNode* ptr) -> void {
+        ptr->Children()[idx] = std::move(child);
       }};
 
   nodes::VisitPtr(visitor, parent);
@@ -80,9 +83,25 @@ void MoveAttributes(ecs::Entity dst, ecs::Entity src) {
       ...);
 }
 
-template <lexerv2::TokenType token_type, typename AstNode, typename... Attrs>
+//===========================^=HELPERS=^============================================================
+
+//===========================V=TOKEN=TO=NODE=V======================================================
+
+template <lexer::TokenType token_type, typename AstNode, typename... Attrs>
 struct TokenCase {
-  static constexpr lexerv2::TokenType kTokenType = token_type;
+  static bool CreateNode(nodes::NodesVariant& result,
+                         lexer::Token& token,
+                         lexer::TokenType type) {
+    if (token_type != type) {
+      return false;
+    }
+
+    auto tmp = std::make_unique<AstNode>();
+    MoveAttributes<Attrs...>(*tmp, token);
+    result = std::move(tmp);
+
+    return true;
+  }
 };
 
 /**
@@ -100,24 +119,12 @@ struct TokenCase {
  * ErrorMessage set to error_msg.
  */
 template <typename... Cases>
-[[nodiscard]] nodes::NodesVariant TokenToNode(lexerv2::Token& token,
+[[nodiscard]] nodes::NodesVariant TokenToNode(lexer::Token& token,
                                               std::string error_msg) {
   nodes::NodesVariant result(std::unique_ptr<nodes::BaseNode>(nullptr));
-  lexerv2::TokenType token_type = token.GetType();
+  lexer::TokenType token_type = token.GetType();
 
-  auto token_creator = [&result, &token]<lexerv2::TokenType token_type,
-                                         typename AstNode,
-                                         typename... Attrs>(
-                           TokenCase<token_type, AstNode, Attrs...>) -> void {
-    auto tmp = std::make_unique<AstNode>();
-    MoveAttributes<Attrs...>(*tmp, token);
-    result = std::move(tmp);
-  };
-
-  bool success =
-      ((token_type == Cases::kTokenType ? (token_creator(Cases{}), true)
-                                        : false) ||
-       ...);
+  bool success = ((Cases::CreateNode(result, token, token_type)) || ...);
 
   if (success) {
     return result;
@@ -134,9 +141,13 @@ template <typename... Cases>
   return tmp;
 };
 
+//===========================^=TOKEN=TO=NODE=^======================================================
+
+//===========================V=PARSER=V=============================================================
+
 class Parser {
  public:
-  [[nodiscard]] explicit Parser(std::vector<lexerv2::Token> input);
+  [[nodiscard]] explicit Parser(std::vector<lexer::Token> input);
   [[nodiscard]] nodes::NodesVariant Parse();
 
  private:
@@ -172,33 +183,33 @@ class Parser {
 
   void NextToken();
 
-  template <lexerv2::TokenType... tokens>
-  bool SkipUntil() ;
+  template <lexer::TokenType... tokens>
+  bool SkipUntil();
 
-  template <lexerv2::TokenType... tokens>
-  bool Consume() ;
+  template <lexer::TokenType... tokens>
+  bool Consume();
 
-  template <lexerv2::TokenType... tokens>
-  [[nodiscard]] bool Lookup() ;
+  template <lexer::TokenType... tokens>
+  [[nodiscard]] bool Lookup();
 
-  std::vector<lexerv2::Token> input_;
-  lexerv2::Token cur_token_;
+  std::vector<lexer::Token> input_;
+  lexer::Token cur_token_;
   std::size_t next_token_index_{1};
 };
 
-Parser::Parser(std::vector<lexerv2::Token> input)
+Parser::Parser(std::vector<lexer::Token> input)
     : input_(std::move(input)), cur_token_(input_[0]) {};
 
 nodes::NodesVariant Parser::Parse() {
   auto result = std::make_unique<nodes::Program>();
 
-  while (!Lookup<lexerv2::TokenType::kEofToken>()) {
+  while (!Lookup<lexer::TokenType::kEofToken>()) {
     bool success =
         PushCheckErr(result->Children(), ParseFunctionDefinition()) or
-        SkipUntil<lexerv2::TokenType::kKwchar,
-                  lexerv2::TokenType::kKwint,
-                  lexerv2::TokenType::kKwuint,
-                  lexerv2::TokenType::kKwfloat>();
+        SkipUntil<lexer::TokenType::kKwchar,
+                  lexer::TokenType::kKwint,
+                  lexer::TokenType::kKwuint,
+                  lexer::TokenType::kKwfloat>();
     result->Healthy() &= success;
   }
 
@@ -224,10 +235,10 @@ nodes::NodesVariant Parser::ParseTypeDeclaration() {
 
   // clang-format off
   auto child = TokenToNode<
-    TokenCase<lexerv2::TokenType::kKwchar, nodes::KeywordChar, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kKwint, nodes::KeywordInt, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kKwuint, nodes::KeywordUint, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kKwfloat, nodes::KeywordFloat, ecs::TokenStart, ecs::TokenStop>
+    TokenCase<lexer::TokenType::kKwchar, nodes::KeywordChar, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kKwint, nodes::KeywordInt, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kKwuint, nodes::KeywordUint, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kKwfloat, nodes::KeywordFloat, ecs::TokenStart, ecs::TokenStop>
   >(cur_token_, "expected type");
   // clang-format on
 
@@ -244,7 +255,7 @@ nodes::NodesVariant Parser::ParseName() {
 
   // clang-format off
   auto child = TokenToNode<
-    TokenCase<lexerv2::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
+    TokenCase<lexer::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
   >(cur_token_, "expected id");
   // clang-format on
 
@@ -260,21 +271,21 @@ nodes::NodesVariant Parser::ParseParameterList() {
   auto result = std::make_unique<nodes::ParameterList>();
 
   bool success =
-      Consume<lexerv2::TokenType::kSyntLparent>() and
-      (Lookup<lexerv2::TokenType::kSyntRparent>()
+      Consume<lexer::TokenType::kSyntLparent>() and
+      (Lookup<lexer::TokenType::kSyntRparent>()
            ? true
            : (PushCheckErr(result->Children(), ParseParameterDecl()) or
-              SkipUntil<lexerv2::TokenType::kSyntRparent,
-                        lexerv2::TokenType::kSyntComma>()));
+              SkipUntil<lexer::TokenType::kSyntRparent,
+                        lexer::TokenType::kSyntComma>()));
 
-  while (success && Lookup<lexerv2::TokenType::kSyntComma>()) {
-    success &= Consume<lexerv2::TokenType::kSyntComma>() and
+  while (success && Lookup<lexer::TokenType::kSyntComma>()) {
+    success &= Consume<lexer::TokenType::kSyntComma>() and
                (PushCheckErr(result->Children(), ParseParameterDecl()) or
-                SkipUntil<lexerv2::TokenType::kSyntRparent,
-                          lexerv2::TokenType::kSyntComma>());
+                SkipUntil<lexer::TokenType::kSyntRparent,
+                          lexer::TokenType::kSyntComma>());
   }
 
-  success &= Consume<lexerv2::TokenType::kSyntRparent>();
+  success &= Consume<lexer::TokenType::kSyntRparent>();
 
   result->Healthy() &= success;
 
@@ -294,15 +305,15 @@ nodes::NodesVariant Parser::ParseParameterDecl() {
 }
 
 nodes::NodesVariant Parser::ParseBlockStatement() {
-  bool success = Consume<lexerv2::TokenType::kSyntLbrace>();
+  bool success = Consume<lexer::TokenType::kSyntLbrace>();
   std::vector<nodes::NodesVariant> stmts;
 
-  while (success && !Lookup<lexerv2::TokenType::kSyntRbrace>()) {
+  while (success && !Lookup<lexer::TokenType::kSyntRbrace>()) {
     success &= PushCheckErr(stmts, ParseStatement()) or
-               SkipUntil<lexerv2::TokenType::kSyntRbrace>();
+               SkipUntil<lexer::TokenType::kSyntRbrace>();
   }
 
-  success &= Consume<lexerv2::TokenType::kSyntRbrace>();
+  success &= Consume<lexer::TokenType::kSyntRbrace>();
 
   if (stmts.size() == 1) {
     auto result = std::move(stmts.back());
@@ -321,40 +332,40 @@ void Parser::TryFixStatement(nodes::NodesVariant& result) {
   bool success = IsHealthy(result);
 
   if (!success) {
-    success = SkipUntil<lexerv2::TokenType::kSyntSemicolon,
-                        lexerv2::TokenType::kSyntRbrace>() and
-              Consume<lexerv2::TokenType::kSyntSemicolon>();
+    success = SkipUntil<lexer::TokenType::kSyntSemicolon,
+                        lexer::TokenType::kSyntRbrace>() and
+              Consume<lexer::TokenType::kSyntSemicolon>();
   }
 
   SetHealthy(result, success);
 }
 
 nodes::NodesVariant Parser::ParseStatement() {
-  if (Lookup<lexerv2::TokenType::kKwif>()) {
+  if (Lookup<lexer::TokenType::kKwif>()) {
     return ParseIfStatement();
   }
 
-  if (Lookup<lexerv2::TokenType::kKwwhile>()) {
+  if (Lookup<lexer::TokenType::kKwwhile>()) {
     return ParseWhileStatement();
   }
 
-  if (Lookup<lexerv2::TokenType::kKwreturn>()) {
+  if (Lookup<lexer::TokenType::kKwreturn>()) {
     auto result = ParseReturnStatement();
     TryFixStatement(result);
     return result;
   }
 
-  if (Lookup<lexerv2::TokenType::kKwchar,
-             lexerv2::TokenType::kKwint,
-             lexerv2::TokenType::kKwuint,
-             lexerv2::TokenType::kKwfloat>()) {
+  if (Lookup<lexer::TokenType::kKwchar,
+             lexer::TokenType::kKwint,
+             lexer::TokenType::kKwuint,
+             lexer::TokenType::kKwfloat>()) {
 
     auto result = ParseVariableDefinition();
     TryFixStatement(result);
     return result;
   }
 
-  if (Lookup<lexerv2::TokenType::kIdToken>()) {
+  if (Lookup<lexer::TokenType::kIdToken>()) {
     auto result = ParseAssignmentOrCall();
     TryFixStatement(result);
     return result;
@@ -374,9 +385,9 @@ nodes::NodesVariant Parser::ParseVariableDefinition() {
   bool success =
       StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
       StoreCheckErr(result->Children()[1], ParseName()) and
-      Consume<lexerv2::TokenType::kBinAssign>() and
+      Consume<lexer::TokenType::kBinAssign>() and
       StoreCheckErr(result->Children()[2], ParseExpression()) and
-      Consume<lexerv2::TokenType::kSyntSemicolon>();
+      Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
   return result;
@@ -385,14 +396,14 @@ nodes::NodesVariant Parser::ParseVariableDefinition() {
 nodes::NodesVariant Parser::ParseIfStatement() {
   auto result = std::make_unique<nodes::IfStatement>();
 
-  bool success = Consume<lexerv2::TokenType::kKwif>() and
+  bool success = Consume<lexer::TokenType::kKwif>() and
                  StoreCheckErr(result->Children()[0], ParseExpression()) and
                  StoreCheckErr(result->Children()[1], ParseBlockStatement());
 
-  if (Lookup<lexerv2::TokenType::kKwelse>()) {
-    success &= Consume<lexerv2::TokenType::kKwelse>();
+  if (Lookup<lexer::TokenType::kKwelse>()) {
+    success &= Consume<lexer::TokenType::kKwelse>();
 
-    if (Lookup<lexerv2::TokenType::kKwif>()) {
+    if (Lookup<lexer::TokenType::kKwif>()) {
       success &= StoreCheckErr(result->Children()[2], ParseIfStatement());
     } else {
       success &= StoreCheckErr(result->Children()[2], ParseBlockStatement());
@@ -406,7 +417,7 @@ nodes::NodesVariant Parser::ParseIfStatement() {
 nodes::NodesVariant Parser::ParseWhileStatement() {
   auto result = std::make_unique<nodes::WhileStatement>();
 
-  bool success = Consume<lexerv2::TokenType::kKwwhile>() and
+  bool success = Consume<lexer::TokenType::kKwwhile>() and
                  StoreCheckErr(result->Children()[0], ParseExpression()) and
                  StoreCheckErr(result->Children()[1], ParseBlockStatement());
 
@@ -417,13 +428,13 @@ nodes::NodesVariant Parser::ParseWhileStatement() {
 nodes::NodesVariant Parser::ParseReturnStatement() {
   auto result = std::make_unique<nodes::ReturnStatement>();
 
-  bool success = Consume<lexerv2::TokenType::kKwreturn>();
+  bool success = Consume<lexer::TokenType::kKwreturn>();
 
-  if (!Lookup<lexerv2::TokenType::kSyntSemicolon>()) {
+  if (!Lookup<lexer::TokenType::kSyntSemicolon>()) {
     success &= StoreCheckErr(result->Children()[0], ParseExpression());
   }
 
-  success &= Consume<lexerv2::TokenType::kSyntSemicolon>();
+  success &= Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
   return result;
@@ -432,7 +443,7 @@ nodes::NodesVariant Parser::ParseReturnStatement() {
 nodes::NodesVariant Parser::ParseAssignmentOrCall() {
   auto locator = ParseLocator();
 
-  if (Lookup<lexerv2::TokenType::kSyntLparent>()) {
+  if (Lookup<lexer::TokenType::kSyntLparent>()) {
     return ParseCallStatement(std::move(locator));
   }
 
@@ -444,9 +455,9 @@ auto Parser::ParseAssignment(nodes::NodesVariant&& locator)
   auto result = std::make_unique<nodes::Assignment>();
 
   bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
-                 Consume<lexerv2::TokenType::kBinAssign>() and
+                 Consume<lexer::TokenType::kBinAssign>() and
                  StoreCheckErr(result->Children()[1], ParseExpression()) and
-                 Consume<lexerv2::TokenType::kSyntSemicolon>();
+                 Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
   return result;
@@ -458,7 +469,7 @@ auto Parser::ParseCallStatement(nodes::NodesVariant&& locator)
 
   bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
                  StoreCheckErr(result->Children()[1], ParseCallSuffix()) and
-                 Consume<lexerv2::TokenType::kSyntSemicolon>();
+                 Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
   return result;
@@ -469,7 +480,7 @@ nodes::NodesVariant Parser::ParseLocator() {
 
   // clang-format off
   auto child = TokenToNode<
-    TokenCase<lexerv2::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
+    TokenCase<lexer::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
   >(cur_token_, "expected id");
   // clang-format on
 
@@ -487,22 +498,22 @@ nodes::NodesVariant Parser::ParseExpression() { return ParseLogExpr(); }
 nodes::NodesVariant Parser::ParseLogExpr() {
   // clang-format off
   auto node_creator = &TokenToNode<
-    TokenCase<lexerv2::TokenType::kBinLogicalOr, nodes::LogOr, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinLogicalAnd, nodes::LogAnd, ecs::TokenStart, ecs::TokenStop>
+    TokenCase<lexer::TokenType::kBinLogicalOr, nodes::LogOr, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinLogicalAnd, nodes::LogAnd, ecs::TokenStart, ecs::TokenStop>
   >;
   // clang-format on
 
   auto last_node = ParseComparExpr();
   bool success = IsHealthy(last_node);
 
-  while (success && Lookup<lexerv2::TokenType::kBinLogicalAnd,
-                           lexerv2::TokenType::kBinLogicalOr>()) {
+  while (success && Lookup<lexer::TokenType::kBinLogicalAnd,
+                           lexer::TokenType::kBinLogicalOr>()) {
     auto tmp = node_creator(cur_token_, "expected && or ||");
-    StoreChild<0>(tmp, std::move(last_node));
+    StoreChild(tmp, std::move(last_node), 0);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild<1>(last_node, ParseComparExpr());
+    success &= StoreChild(last_node, ParseComparExpr(), 1);
   }
 
   SetHealthy(last_node, success);
@@ -512,30 +523,30 @@ nodes::NodesVariant Parser::ParseLogExpr() {
 nodes::NodesVariant Parser::ParseComparExpr() {
   // clang-format off
   auto node_creator = &TokenToNode<
-    TokenCase<lexerv2::TokenType::kBinEq, nodes::BinEq, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinNeq, nodes::BinNeq, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinLt, nodes::BinLt, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinLeq, nodes::BinLeq, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinGt, nodes::BinGt, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinGeq, nodes::BinGeq, ecs::TokenStart, ecs::TokenStop>
+    TokenCase<lexer::TokenType::kBinEq, nodes::BinEq, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinNeq, nodes::BinNeq, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinLt, nodes::BinLt, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinLeq, nodes::BinLeq, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinGt, nodes::BinGt, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinGeq, nodes::BinGeq, ecs::TokenStart, ecs::TokenStop>
   >;
   // clang-format on
 
   auto last_node = ParseAddExpr();
   bool success = IsHealthy(last_node);
 
-  while (success && Lookup<lexerv2::TokenType::kBinEq,
-                           lexerv2::TokenType::kBinNeq,
-                           lexerv2::TokenType::kBinLt,
-                           lexerv2::TokenType::kBinLeq,
-                           lexerv2::TokenType::kBinGt,
-                           lexerv2::TokenType::kBinGeq>()) {
+  while (success && Lookup<lexer::TokenType::kBinEq,
+                           lexer::TokenType::kBinNeq,
+                           lexer::TokenType::kBinLt,
+                           lexer::TokenType::kBinLeq,
+                           lexer::TokenType::kBinGt,
+                           lexer::TokenType::kBinGeq>()) {
     auto tmp = node_creator(cur_token_, "expected comparison operator");
-    StoreChild<0>(tmp, std::move(last_node));
+    StoreChild(tmp, std::move(last_node), 0);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild<1>(last_node, ParseAddExpr());
+    success &= StoreChild(last_node, ParseAddExpr(), 1);
   }
 
   SetHealthy(last_node, success);
@@ -545,8 +556,8 @@ nodes::NodesVariant Parser::ParseComparExpr() {
 nodes::NodesVariant Parser::ParseAddExpr() {
   // clang-format off
   auto node_creator = &TokenToNode<
-    TokenCase<lexerv2::TokenType::kBinPlus, nodes::BinPlus, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinMinus, nodes::BinMinus, ecs::TokenStart, ecs::TokenStop>
+    TokenCase<lexer::TokenType::kBinPlus, nodes::BinPlus, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinMinus, nodes::BinMinus, ecs::TokenStart, ecs::TokenStop>
   >;
   // clang-format on
 
@@ -555,13 +566,13 @@ nodes::NodesVariant Parser::ParseAddExpr() {
 
   while (
       success &&
-      Lookup<lexerv2::TokenType::kBinPlus, lexerv2::TokenType::kBinMinus>()) {
+      Lookup<lexer::TokenType::kBinPlus, lexer::TokenType::kBinMinus>()) {
     auto tmp = node_creator(cur_token_, "expected + or -");
-    StoreChild<0>(tmp, std::move(last_node));
+    StoreChild(tmp, std::move(last_node), 0);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild<1>(last_node, ParseMulExpr());
+    success &= StoreChild(last_node, ParseMulExpr(), 1);
   }
 
   SetHealthy(last_node, success);
@@ -571,24 +582,24 @@ nodes::NodesVariant Parser::ParseAddExpr() {
 nodes::NodesVariant Parser::ParseMulExpr() {
   // clang-format off
   auto node_creator = &TokenToNode<
-    TokenCase<lexerv2::TokenType::kBinMul, nodes::BinMul, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinDiv, nodes::BinDiv, ecs::TokenStart, ecs::TokenStop>,
-    TokenCase<lexerv2::TokenType::kBinMod, nodes::BinMod, ecs::TokenStart, ecs::TokenStop>
+    TokenCase<lexer::TokenType::kBinMul, nodes::BinMul, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinDiv, nodes::BinDiv, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexer::TokenType::kBinMod, nodes::BinMod, ecs::TokenStart, ecs::TokenStop>
   >;
   // clang-format on
 
   auto last_node = ParseUnaryExpr();
   bool success = IsHealthy(last_node);
 
-  while (success && Lookup<lexerv2::TokenType::kBinMul,
-                           lexerv2::TokenType::kBinDiv,
-                           lexerv2::TokenType::kBinMod>()) {
+  while (success && Lookup<lexer::TokenType::kBinMul,
+                           lexer::TokenType::kBinDiv,
+                           lexer::TokenType::kBinMod>()) {
     auto tmp = node_creator(cur_token_, "expected *, / or %");
-    StoreChild<0>(tmp, std::move(last_node));
+    StoreChild(tmp, std::move(last_node), 0);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild<1>(last_node, ParseUnaryExpr());
+    success &= StoreChild(last_node, ParseUnaryExpr(), 1);
   }
 
   SetHealthy(last_node, success);
@@ -596,7 +607,7 @@ nodes::NodesVariant Parser::ParseMulExpr() {
 }
 
 nodes::NodesVariant Parser::ParseUnaryExpr() {
-  if (Lookup<lexerv2::TokenType::kUnLogicalNot>()) {
+  if (Lookup<lexer::TokenType::kUnLogicalNot>()) {
     return ParseLogNotExpr();
   }
 
@@ -606,7 +617,7 @@ nodes::NodesVariant Parser::ParseUnaryExpr() {
 nodes::NodesVariant Parser::ParseLogNotExpr() {
   auto result = std::make_unique<nodes::LogNotExpr>();
 
-  bool success = Consume<lexerv2::TokenType::kUnLogicalNot>() and
+  bool success = Consume<lexer::TokenType::kUnLogicalNot>() and
                  StoreCheckErr(result->Children()[0], ParsePrimaryExpr());
 
   result->Healthy() &= success;
@@ -614,22 +625,22 @@ nodes::NodesVariant Parser::ParseLogNotExpr() {
 }
 
 nodes::NodesVariant Parser::ParsePrimaryExpr() {
-  if (Lookup<lexerv2::TokenType::kSyntLparent>()) {
-    Consume<lexerv2::TokenType::kSyntLparent>();
+  if (Lookup<lexer::TokenType::kSyntLparent>()) {
+    Consume<lexer::TokenType::kSyntLparent>();
 
     auto result = ParseExpression();
 
     bool success = IsHealthy(result);
 
     if (success) {
-      success &= Consume<lexerv2::TokenType::kSyntRparent>();
+      success &= Consume<lexer::TokenType::kSyntRparent>();
     }
 
     if (!success) {
-      success = SkipUntil<lexerv2::TokenType::kSyntRparent,
-                          lexerv2::TokenType::kSyntSemicolon,
-                          lexerv2::TokenType::kSyntRbrace>() and
-                Consume<lexerv2::TokenType::kSyntRparent>();
+      success = SkipUntil<lexer::TokenType::kSyntRparent,
+                          lexer::TokenType::kSyntSemicolon,
+                          lexer::TokenType::kSyntRbrace>() and
+                Consume<lexer::TokenType::kSyntRparent>();
     }
 
     SetHealthy(result, success);
@@ -637,7 +648,7 @@ nodes::NodesVariant Parser::ParsePrimaryExpr() {
     return result;
   }
 
-  if (Lookup<lexerv2::TokenType::kIdToken>()) {
+  if (Lookup<lexer::TokenType::kIdToken>()) {
     return ParseLocatorOrCall();
   }
 
@@ -647,7 +658,7 @@ nodes::NodesVariant Parser::ParsePrimaryExpr() {
 nodes::NodesVariant Parser::ParseLocatorOrCall() {
   auto locator = ParseLocator();
 
-  if (!Lookup<lexerv2::TokenType::kSyntLparent>()) {
+  if (!Lookup<lexer::TokenType::kSyntLparent>()) {
     return locator;
   }
 
@@ -662,21 +673,21 @@ nodes::NodesVariant Parser::ParseLocatorOrCall() {
 
 nodes::NodesVariant Parser::ParseCallSuffix() {
   auto result = std::make_unique<nodes::CallSuffix>();
-  bool success = Consume<lexerv2::TokenType::kSyntLparent>() and
-                 (Lookup<lexerv2::TokenType::kSyntRparent>()
+  bool success = Consume<lexer::TokenType::kSyntLparent>() and
+                 (Lookup<lexer::TokenType::kSyntRparent>()
                       ? true
                       : (PushCheckErr(result->Children(), ParseExpression()) or
-                         SkipUntil<lexerv2::TokenType::kSyntRparent,
-                                   lexerv2::TokenType::kSyntComma>()));
+                         SkipUntil<lexer::TokenType::kSyntRparent,
+                                   lexer::TokenType::kSyntComma>()));
 
-  while (success && Lookup<lexerv2::TokenType::kSyntComma>()) {
-    success &= Consume<lexerv2::TokenType::kSyntComma>() and
+  while (success && Lookup<lexer::TokenType::kSyntComma>()) {
+    success &= Consume<lexer::TokenType::kSyntComma>() and
                (PushCheckErr(result->Children(), ParseExpression()) or
-                SkipUntil<lexerv2::TokenType::kSyntRparent,
-                          lexerv2::TokenType::kSyntComma>());
+                SkipUntil<lexer::TokenType::kSyntRparent,
+                          lexer::TokenType::kSyntComma>());
   }
 
-  success &= Consume<lexerv2::TokenType::kSyntRparent>();
+  success &= Consume<lexer::TokenType::kSyntRparent>();
 
   result->Healthy() &= success;
   return result;
@@ -685,9 +696,9 @@ nodes::NodesVariant Parser::ParseCallSuffix() {
 nodes::NodesVariant Parser::ParseLiteral() {
   // clang-format off
   auto res = TokenToNode<
-    TokenCase<lexerv2::TokenType::kIntLiteral, nodes::IntLiteral, ecs::IntValue>,
-    TokenCase<lexerv2::TokenType::kFloatLiteral, nodes::FloatLiteral, ecs::FloatValue>,
-    TokenCase<lexerv2::TokenType::kStringLiteral, nodes::StrLiteral, ecs::StrValue>
+    TokenCase<lexer::TokenType::kIntLiteral, nodes::IntLiteral, ecs::IntValue>,
+    TokenCase<lexer::TokenType::kFloatLiteral, nodes::FloatLiteral, ecs::FloatValue>,
+    TokenCase<lexer::TokenType::kStringLiteral, nodes::StrLiteral, ecs::StrValue>
   >(cur_token_, "expected literal");
   // clang-format on
 
@@ -706,14 +717,14 @@ void Parser::NextToken() {
   cur_token_ = input_[next_token_index_++];
 }
 
-template <lexerv2::TokenType... tokens>
+template <lexer::TokenType... tokens>
 bool Parser::SkipUntil() {
   while (true) {
     if (Lookup<tokens...>()) {
       return true;
     }
 
-    if (Lookup<lexerv2::TokenType::kEofToken>()) {
+    if (Lookup<lexer::TokenType::kEofToken>()) {
       return false;
     }
 
@@ -723,7 +734,7 @@ bool Parser::SkipUntil() {
 }
 
 // TODO error report (probably just print, no error tokens)
-template <lexerv2::TokenType... tokens>
+template <lexer::TokenType... tokens>
 bool Parser::Consume() {
   if (Lookup<tokens...>()) {
     NextToken();
@@ -733,18 +744,20 @@ bool Parser::Consume() {
   return false;
 }
 
-template <lexerv2::TokenType... tokens>
+template <lexer::TokenType... tokens>
 bool Parser::Lookup() {
   return ((cur_token_.GetType() == tokens) || ...);
 }
 
+//===========================^=PARSER=^=============================================================
+
 }  // namespace
 
-nodes::NodesVariant Parse(std::vector<lexerv2::Token> input) {
+nodes::NodesVariant Parse(std::vector<lexer::Token> input) {
   Parser parser(std::move(input));
   return parser.Parse();
 }
 
-}  // namespace parserv2
+}  // namespace parser
 
 // NOLINTEND(misc-no-recursion)

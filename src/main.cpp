@@ -17,13 +17,13 @@ auto main() -> int {
     input += tmp + "\n";
   }
 
-  std::vector<lexerv2::Token> vec_input;
-  lexerv2::Lexer lex(input);
+  std::vector<lexer::Token> vec_input;
+  lexer::Lexer lex(input);
 
   do {
     vec_input.push_back(lex.NextToken());
-  } while (vec_input.back().GetType() != lexerv2::TokenType::kEofToken);
+  } while (vec_input.back().GetType() != lexer::TokenType::kEofToken);
 
-  auto ast = parserv2::Parse(vec_input);
-  parserv2::DumpAst(std::cout, ast);
+  auto ast = parser::Parse(vec_input);
+  parser::DumpAst(std::cout, ast);
 }

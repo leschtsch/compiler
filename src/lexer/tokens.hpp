@@ -12,7 +12,7 @@
 
 #include <cstdint>
 
-namespace lexerv2 {
+namespace lexer {
 
 #define UN_OP(name, x) kUn##name,
 #define BIN_OP(name, x) kBin##name,
@@ -50,4 +50,4 @@ class Token : public ecs::Entity {
   TokenType type_{TokenType::kErrorToken};
 };
 
-}  // namespace lexerv2
+}  // namespace lexer
