@@ -1,8 +1,14 @@
-**build**
 **.swp
 **.swo
 **output**
-**bin**
-**coverage**
+
+build/**
+bin/**
+coverage/**
+docs/**
+**.log**
 
 !scripts/coverage.sh
+
+ast.dot
+ast.svg

@@ -1,0 +1,8 @@
+UN_OP(Plus, "+")
+UN_OP(Minus, "-")
+UN_OP(BitNot, "~")
+UN_OP(LogicalNot, "!")
+UN_OP(Inc, "--")
+UN_OP(Dec, "++")
+UN_OP(Address, "&")
+UN_OP(Dereference, "*")
