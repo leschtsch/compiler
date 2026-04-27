@@ -36,7 +36,9 @@ struct Entity {
 };
 
 template <details::BareType Type>
-struct Component {};
+struct Component {
+  using T = Type;
+};
 
 namespace details {
 
@@ -66,15 +68,15 @@ struct OptionalReference {
   OptionalReference(OptionalReference&& other) = delete;
   auto operator=(OptionalReference&& other) -> OptionalReference& = delete;
 
-  auto operator->() noexcept -> T* { return data_; }
-  auto operator->() const noexcept -> const T* { return data_; }
+  [[nodiscard]]T* operator->() noexcept { return data_; }
+  [[nodiscard]]const T* operator->() const noexcept { return data_; }
 
-  [[nodiscard]] auto operator*() noexcept -> T& { return *data_; }
-  [[nodiscard]] auto operator*() const noexcept -> const T& { return *data_; }
+  [[nodiscard]] T& operator*() noexcept { return *data_; }
+  [[nodiscard]] const T& operator*() const noexcept { return *data_; }
 
-  [[nodiscard]] auto HasValue() const noexcept -> bool { return data_ != nullptr; }
+  [[nodiscard]] bool HasValue() const noexcept { return data_ != nullptr; }
 
-  [[nodiscard]] auto Value() -> T& {
+  [[nodiscard]] T& Value() {
     if (!HasValue()) {
       throw std::bad_optional_access{};
     }
@@ -82,7 +84,7 @@ struct OptionalReference {
     return (*data_);
   }
 
-  [[nodiscard]] auto Value() const -> const T& {
+  [[nodiscard]] const T& Value() const {
     if (!HasValue()) {
       throw std::bad_optional_access{};
     }
@@ -101,7 +103,7 @@ concept MatchesComponent =
 template <IsComponent C>
 class EcsHelper {
  private:
-  using Type = GetTypeT<C>;
+  using Type = typename C::T;
 
  public:
   template <MatchesComponent<C> T>
@@ -111,7 +113,7 @@ class EcsHelper {
 
   static void Drop(const Entity& entity) { storage.erase(entity.id); }
 
-  static auto Get(const Entity& entity) -> OptionalReference<Type> {
+  static OptionalReference<Type> Get(const Entity& entity) {
     auto found = storage.find(entity.id);
 
     if (found == storage.end()) {
@@ -137,12 +139,14 @@ void Drop(const Entity& entity) {
 }
 
 template <IsComponent C>
-auto Get(const Entity& entity) {
+[[nodiscard]] auto Get(const Entity& entity) {
   return details::EcsHelper<C>::Get(entity);
 }
 
 template <IsComponent C>
 std::unordered_map<details::IdT, typename details::EcsHelper<C>::Type>
     details::EcsHelper<C>::storage = {};
+
+// TODO: gc
 
 }  // namespace ecs

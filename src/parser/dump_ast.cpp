@@ -4,32 +4,31 @@
 #include <ecs/used_components.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <ostream>
 #include <string>
 #include <variant>
 
 #include "ast.hpp"
 
-namespace parser {
+namespace parserv2 {
 
 namespace {
 
 //===========================V=HELPERS=V============================================================
-void DumpNodeOpen(std::ostream& ostream, const AstNode* node) {
+void DumpNodeOpen(std::ostream& ostream, const nodes::BaseNode* node) {
   ostream << reinterpret_cast<std::uintptr_t>(node) << "[ ";
 }
 
-void DumpNodeLabel(std::ostream& ostream, auto tok) {
-  ostream << "label = \"" << tokens::GetName(tok) << "\" ";
+void DumpNodeLabel(std::ostream& ostream, auto* node) {
+  ostream << "label = \"" << nodes::GetName(node) << "\" ";
 }
 
 void DumpNodeLabel(std::ostream& ostream, const std::string& label) {
   ostream << "label = \"" << label << "\" ";
 }
 
-void DumpNodeColor(std::ostream& ostream, const AstNode* node) {
-  if (node->has_active_error) {
+void DumpNodeColor(std::ostream& ostream, const nodes::BaseNode* node) {
+  if (!node->Healthy()) {
     ostream << "style=filled fillcolor=lightpink ";
   }
 }
@@ -40,98 +39,95 @@ void DumpNodeColor(std::ostream& ostream, const std::string& color) {
 
 void DumpNodeClose(std::ostream& ostream) { ostream << "];\n"; }
 
+[[nodiscard]]  void* GetAddr(const nodes::NodesVariant& node) {
+  return std::visit([](auto& ptr) -> void* { return ptr.get(); }, node);
+}
 //===========================^=HELPERS=^============================================================
 
 //===========================V=DUMP=OVERLOADS=V=====================================================
-void DumpNodeBody(std::ostream& ostream, auto tok, const AstNode* node) {
-  DumpNodeLabel(ostream, tok);
+void DumpNodeBody(std::ostream& ostream, const auto* node) {
+  DumpNodeLabel(ostream, node);
   DumpNodeColor(ostream, node);
 }
 
-void DumpNodeBody(std::ostream& ostream,
-                  tokens::IdToken tok,
-                  const AstNode* node) {
+void DumpNodeBody(std::ostream& ostream, const nodes::IdNode* node) {
   DumpNodeLabel(
       ostream,
-      tokens::GetName(tok) + "\\n" + ecs::Get<ecs::IdName>(tok).Value());
+      nodes::GetName(node) + "\\n" + ecs::Get<ecs::IdName>(*node).Value());
 
   DumpNodeColor(ostream, node);
 }
 
-void DumpNodeBody(std::ostream& ostream,
-                  tokens::ErrorToken tok,
-                  const AstNode* /* node */) {
+void DumpNodeBody(std::ostream& ostream, const nodes::ErrorNode* node) {
   // TODO: escape sequences
 
-  DumpNodeLabel(ostream, ecs::Get<ecs::ErrorMessage>(tok).Value());
+  DumpNodeLabel(ostream, ecs::Get<ecs::ErrorMessage>(*node).Value());
   DumpNodeColor(ostream, "darkred");
 }
 
-void DumpNodeBody(std::ostream& ostream,
-                  tokens::IntLiteral tok,
-                  const AstNode* /* node */) {
+void DumpNodeBody(std::ostream& ostream, const nodes::IntLiteral* node) {
 
   DumpNodeLabel(ostream,
-                tokens::GetName(tok) + "\\n" +
-                    std::to_string(ecs::Get<ecs::IntValue>(tok).Value()));
+                nodes::GetName(node) + "\\n" +
+                    std::to_string(ecs::Get<ecs::IntValue>(*node).Value()));
 }
 
-void DumpNodeBody(std::ostream& ostream,
-                  tokens::FloatLiteral tok,
-                  const AstNode* /* node */) {
+void DumpNodeBody(std::ostream& ostream, const nodes::FloatLiteral* node) {
 
   DumpNodeLabel(ostream,
-                tokens::GetName(tok) + "\\n" +
-                    std::to_string(ecs::Get<ecs::FloatValue>(tok).Value()));
+                nodes::GetName(node) + "\\n" +
+                    std::to_string(ecs::Get<ecs::FloatValue>(*node).Value()));
 }
 
-void DumpNodeBody(std::ostream& ostream,
-                  tokens::StrLiteral tok,
-                  const AstNode* /* node */) {
+void DumpNodeBody(std::ostream& ostream, const nodes::StrLiteral* node) {
 
   // TODO: escape sequences
   DumpNodeLabel(
       ostream,
-      tokens::GetName(tok) + "\\n" + ecs::Get<ecs::StrValue>(tok).Value());
+      nodes::GetName(node) + "\\n" + ecs::Get<ecs::StrValue>(*node).Value());
 }
 //===========================^=DUMP=OVERLOADS=V=====================================================
 
-using FakeVariant = std::variant<const AstNode*>;
-
 class Visitor {
  public:
-  explicit Visitor(std::ostream& ostream, const AstNode* node)
-      : ostream_(ostream), node_(node) {}
+  explicit Visitor(std::ostream& ostream) : ostream_(ostream) {}
 
-  void operator()(auto tok, const AstNode* node) {
+  void operator()(const auto& ptr) {
+    const auto* node = ptr.get();
+
+    if (node == nullptr) {
+      return;
+    }
+
     DumpNodeOpen(ostream_, node);
-    DumpNodeBody(ostream_, tok, node);
+    DumpNodeBody(ostream_, node);
     DumpNodeClose(ostream_);
 
-    VisitChildren(node);
+    for (const auto& child : node->ChildrenSpan()) {
+      void* child_addr = GetAddr(child);
+
+      if (child_addr == nullptr) {
+        continue;
+      }
+
+      ostream_ << reinterpret_cast<std::uintptr_t>(node) << " -> "
+               << reinterpret_cast<std::uintptr_t>(child_addr) << ";\n";
+
+      std::visit(*this, child);
+    }
   }
 
  private:
   std::ostream& ostream_;
-  const AstNode* node_;
-
-  void VisitChildren(const AstNode* node) {
-    for (const AstNode& child : node->children) {
-      node_ = std::addressof(child);
-      ostream_ << reinterpret_cast<std::uintptr_t>(node) << " -> "
-               << reinterpret_cast<std::uintptr_t>(node_) << ";\n";
-      std::visit(*this, child.token, FakeVariant(std::addressof(child)));
-    }
-  }
 };
 
 }  // namespace
 
-void DumpAst(std::ostream& ostream, const AstNode& node) {
-  Visitor visitor(ostream, std::addressof(node));
+void DumpAst(std::ostream& ostream, const nodes::NodesVariant& node) {
+  Visitor visitor(ostream);
   ostream << "digraph tree {\n";
-  std::visit(visitor, node.token, FakeVariant(std::addressof(node)));
+  std::visit(visitor, node);
   ostream << "}\n";
 }
 
-}  // namespace parser
+}  // namespace parserv2

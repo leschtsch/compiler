@@ -25,13 +25,11 @@ class Trie {
     friend class Trie<Alphabet, Val>;
 
    public:
-    [[nodiscard]] auto HasValue() const noexcept -> bool {
-      return value_.has_value();
-    }
+    [[nodiscard]] bool HasValue() const noexcept { return value_.has_value(); }
 
     // NOLINTBEGIN(bugprone-unchecked-optional-access): need exception
-    auto Value() const -> const Val& { return value_.value(); }
-    auto Value() -> Val& { return value_.value(); }
+    const Val& Value() const { return value_.value(); }
+    Val& Value() { return value_.value(); }
     // NOLINTEND(bugprone-unchecked-optional-access): need exception
 
    private:
@@ -41,7 +39,7 @@ class Trie {
 
   Trie() = default;
 
-  auto NextNode(Alphabet chr, Node* node = nullptr) -> Node* {
+  Node* NextNode(Alphabet chr, Node* node = nullptr) {
     if (node == nullptr) {
       node = &root_;
     }
@@ -55,7 +53,7 @@ class Trie {
   }
 
   template <typename Container>
-  auto Find(const Container& cont, Node* node = nullptr) -> Node* {
+  Node* Find(const Container& cont, Node* node = nullptr) {
     if (node == nullptr) {
       node = &root_;
     }

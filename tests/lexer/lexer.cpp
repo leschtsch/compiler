@@ -5,204 +5,177 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
-#include <variant>
 
 TEST(Empty, Empty) {
   std::string input;
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Empty, Spaces) {
   std::string input = " \t\n ";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Comments, Ok) {
   std::string input = "//abob/*abiba\n /*a//b/*o*/b//a*/";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Comments, Error) {
   std::string input = "/* /* */";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::ErrorToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kErrorToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Strings, Value) {
   std::string input = R"("\a\b\e\f\n\r\t\v\\\"ab \xff")";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::String>(tok));
-  ecs::Entity entity = std::get<lexer::tokens::String>(tok);
-  EXPECT_EQ(ecs::Get<ecs::StrValue>(entity).Value(),
+  EXPECT_EQ(lexerv2::TokenType::kStringLiteral, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::StrValue>(tok).Value(),
             "\a\b\e\f\n\r\t\v\\\"ab \xff");
 }
 
 TEST(Strings, Errors) {
   std::string input = R"("\xgg \y)";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::ErrorToken>(cur_lexer.NextToken()));
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::ErrorToken>(cur_lexer.NextToken()));
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::ErrorToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kErrorToken, cur_lexer.NextToken().GetType());
+  EXPECT_EQ(lexerv2::TokenType::kErrorToken, cur_lexer.NextToken().GetType());
+  EXPECT_EQ(lexerv2::TokenType::kErrorToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Strings, Errors2) {
   std::string input = R"("\)";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::ErrorToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kErrorToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Strings, Errors3) {
   std::string input = R"("\x1)";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::ErrorToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kErrorToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(Strings, WithComments) {
   std::string input = R"("ab//o/*b*/a")";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::String>(tok));
-  ecs::Entity entity = std::get<lexer::tokens::String>(tok);
-  EXPECT_EQ(ecs::Get<ecs::StrValue>(entity).Value(), "ab//o/*b*/a");
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  EXPECT_EQ(lexerv2::TokenType::kStringLiteral, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::StrValue>(tok).Value(), "ab//o/*b*/a");
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(IdsKws, Id) {
   std::string input = "variable";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  ecs::Entity entity = std::get<lexer::tokens::IdToken>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "variable");
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "variable");
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(IdsKws, Kw) {
   std::string input = "for";
-  lexer::Lexer cur_lexer{input};
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Keyword_for>(
-      cur_lexer.NextToken()));
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  lexerv2::Lexer cur_lexer{input};
+  EXPECT_EQ(lexerv2::TokenType::kKwfor, cur_lexer.NextToken().GetType());
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(IdsKws, Misc) {
   std::string input = "for /* aboba*/ variable";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Keyword_for>(
-      cur_lexer.NextToken()));
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::IdToken>(cur_lexer.NextToken()));
-  EXPECT_TRUE(
-      std::holds_alternative<lexer::tokens::EofToken>(cur_lexer.NextToken()));
+  EXPECT_EQ(lexerv2::TokenType::kKwfor, cur_lexer.NextToken().GetType());
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, cur_lexer.NextToken().GetType());
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, cur_lexer.NextToken().GetType());
 }
 
 TEST(OtherTokens, test1) {
   std::string input = "int z = x + -y;";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Keyword_int>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kKwint, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  ecs::Entity entity = std::get<lexer::tokens::IdToken>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "z");
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "z");
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::BinAssign>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kBinAssign, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  entity = std::get<lexer::tokens::IdToken>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "x");
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "x");
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::BinPlus>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kBinPlus, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::BinMinus>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kBinMinus, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  entity = std::get<lexer::tokens::IdToken>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "y");
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "y");
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxSemicolon>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntSemicolon, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, tok.GetType());
 }
 
 TEST(OtherTokens, Long) {
   std::string input = ">>=!=";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::BinRshiftAssign>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kBinRshiftAssign, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::BinNeq>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kBinNeq, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, tok.GetType());
 }
 
 TEST(Nums, Int) {
   std::string input = " 123 ";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Int>(tok));
-  auto entity = std::get<lexer::tokens::Int>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IntValue>(entity).Value(), 123);
+  EXPECT_EQ(lexerv2::TokenType::kIntLiteral, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IntValue>(tok).Value(), 123);
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, tok.GetType());
 }
 
 TEST(Nums, Float) {
   std::string input = " 0x1.2p-3 ";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Float>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kFloatLiteral, tok.GetType());
 
-  auto entity = std::get<lexer::tokens::Float>(tok);
-  EXPECT_TRUE(std::abs(ecs::Get<ecs::FloatValue>(entity).Value() - 0x1.2p-3) <
+  EXPECT_TRUE(std::abs(ecs::Get<ecs::FloatValue>(tok).Value() - 0x1.2p-3) <
               1e-10);
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, tok.GetType());
 }
 
 TEST(Nums, StartsWithDot) {
   std::string input = " .1 ";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Float>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kFloatLiteral, tok.GetType());
 
-  auto entity = std::get<lexer::tokens::Float>(tok);
-  EXPECT_TRUE(std::abs(ecs::Get<ecs::FloatValue>(entity).Value() - .1) <
-              1e-10);
+  EXPECT_TRUE(std::abs(ecs::Get<ecs::FloatValue>(tok).Value() - .1) < 1e-10);
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, tok.GetType());
 }
 
 TEST(Program, Something) {
@@ -212,61 +185,55 @@ TEST(Program, Something) {
       printf("%d", 1);
     }
   )";
-  lexer::Lexer cur_lexer{input};
+  lexerv2::Lexer cur_lexer{input};
 
   auto tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Keyword_int>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kKwint, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  auto entity = static_cast<ecs::Entity>(std::get<lexer::tokens::IdToken>(tok));
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "main");
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "main");
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxLparent>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntLparent, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxRparent>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntRparent, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxLbrace>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntLbrace, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  entity = std::get<lexer::tokens::IdToken>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "puts");
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "puts");
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxLparent>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntLparent, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::String>(tok));
-  entity = std::get<lexer::tokens::String>(tok);
-  EXPECT_EQ(ecs::Get<ecs::StrValue>(entity).Value(), "hello world");
+  EXPECT_EQ(lexerv2::TokenType::kStringLiteral, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::StrValue>(tok).Value(), "hello world");
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxRparent>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntRparent, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxSemicolon>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntSemicolon, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::IdToken>(tok));
-  entity = std::get<lexer::tokens::IdToken>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IdName>(entity).Value(), "printf");
+  EXPECT_EQ(lexerv2::TokenType::kIdToken, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IdName>(tok).Value(), "printf");
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxLparent>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntLparent, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::String>(tok));
-  entity = std::get<lexer::tokens::String>(tok);
-  EXPECT_EQ(ecs::Get<ecs::StrValue>(entity).Value(), "%d");
+  EXPECT_EQ(lexerv2::TokenType::kStringLiteral, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::StrValue>(tok).Value(), "%d");
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxComma>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntComma, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::Int>(tok));
-  entity = std::get<lexer::tokens::Int>(tok);
-  EXPECT_EQ(ecs::Get<ecs::IntValue>(entity).Value(), 1);
+  EXPECT_EQ(lexerv2::TokenType::kIntLiteral, tok.GetType());
+  EXPECT_EQ(ecs::Get<ecs::IntValue>(tok).Value(), 1);
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxRparent>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntRparent, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxSemicolon>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntSemicolon, tok.GetType());
 
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::SyntaxRbrace>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kSyntRbrace, tok.GetType());
   tok = cur_lexer.NextToken();
-  EXPECT_TRUE(std::holds_alternative<lexer::tokens::EofToken>(tok));
+  EXPECT_EQ(lexerv2::TokenType::kEofToken, tok.GetType());
 }
 
 auto main() -> int {

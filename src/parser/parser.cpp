@@ -9,11 +9,12 @@
 
 #include <ecs/ecs.hpp>
 #include <ecs/used_components.hpp>
-#include <lexer/lexer.hpp>
 #include <lexer/tokens.hpp>
-#include <utils/type_tuple.hpp>
+#include <utils/overloaded.hpp>
 
 #include <cstddef>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -23,672 +24,674 @@
 
 // NOLINTBEGIN(misc-no-recursion)
 
-namespace parser {
+namespace parserv2 {
 
 namespace {
 
-template <typename T, utils::IsTypeTuple TT>
-auto CreateNodeAndGrabAttributes(ecs::Entity entity) -> AstNode {
-  auto tok = T{};
-  auto result =
-      AstNode{.token = tok, .has_active_error = false, .children = {}};
-
-  [&tok, &entity]<typename... Attrs>(utils::TypeTuple<Attrs...>) -> void {
-    (
-        [&tok, &entity]() -> void {
-          auto attr = ecs::Get<Attrs>(entity);
-
-          if (attr.HasValue()) {
-            ecs::Set<Attrs>(tok, std::move(attr.Value()));
-          }
-
-          ecs::Drop<Attrs>(entity);
-        }(),
-        ...);
-  }(TT{});
-
-  return result;
+[[nodiscard]] bool IsHealthy(const nodes::NodesVariant& node) {
+  auto visitor = [](const auto& ptr) -> bool { return ptr->Healthy(); };
+  return std::visit(visitor, node);
 }
 
-template <utils::IsTypeTuple Attrs, utils::IsTypeTuple... Pairs>
-class ParserVisitorOne;
-
-template <utils::IsTypeTuple Attrs, typename T, typename U>
-class ParserVisitorOne<Attrs, utils::TypeTuple<T, U>> {
- public:
-  auto operator()(T tok) -> AstNode {
-    return CreateNodeAndGrabAttributes<U, Attrs>(tok);
-  }
-};
-
-template <utils::IsTypeTuple Attrs, utils::IsTypeTuple... Pairs>
-class ParserVisitor : private ParserVisitorOne<Attrs, Pairs>... {
- public:
-  explicit ParserVisitor(std::string err_msg) : err_msg_(std::move(err_msg)) {}
-
-  auto operator()(auto tok) -> AstNode {
-    AstNode res = CreateNodeAndGrabAttributes<tokens::ErrorToken, Attrs>(tok);
-    res.has_active_error = true;
-
-    auto entity = std::get<tokens::ErrorToken>(res.token);
-    ecs::Set<ecs::ErrorMessage>(entity, std::move(err_msg_));
-    return res;
-  }
-
-  using ParserVisitorOne<Attrs, Pairs>::operator()...;
-
- private:
-  std::string err_msg_;
-};
-
-auto PushCheckErr(AstNode& parent, AstNode&& child) -> bool {
-  bool is_error = (child.has_active_error);
-  parent.children.push_back(std::move(child));
-
-  return !is_error;
+bool StoreCheckErr(nodes::NodesVariant& store, nodes::NodesVariant&& child) {
+  bool is_healthy = IsHealthy(child);
+  store = std::move(child);
+  return is_healthy;
 }
 
-}  // namespace
+template <std::size_t n>
+bool StoreChild(nodes::NodesVariant& parent, nodes::NodesVariant&& child) {
+  bool success = IsHealthy(child);
+
+  auto visitor = utils::Overloaded{
+      [](nodes::BaseNode*) -> void {
+        throw std::runtime_error("setting child of empty node");
+      },
+      [&child]<std::size_t n_children>(nodes::NaryNode<n_children>* ptr)
+          -> void { ptr->Children()[n] = std::move(child); },
+      [&child](nodes::ArbitraryNode* ptr) -> void {
+        ptr->Children()[n] = std::move(child);
+      }};
+
+  nodes::VisitPtr(visitor, parent);
+
+  return success;
+}
+
+bool PushCheckErr(std::vector<nodes::NodesVariant>& store,
+                  nodes::NodesVariant&& child) {
+  bool is_healthy = IsHealthy(child);
+  store.push_back(std::move(child));
+  return is_healthy;
+}
+
+void SetHealthy(nodes::NodesVariant& node, bool healthy) {
+  std::visit([healthy](auto& ptr) -> void { ptr->Healthy() = healthy; }, node);
+}
+
+template <typename... Attrs>
+void MoveAttributes(ecs::Entity dst, ecs::Entity src) {
+  (
+      [&dst, &src]() -> void {
+        auto attr = ecs::Get<Attrs>(src);
+        ecs::Set<Attrs>(dst, std::move(attr.Value()));
+        ecs::Drop<Attrs>(src);
+      }(),
+      ...);
+}
+
+template <lexerv2::TokenType token_type, typename AstNode, typename... Attrs>
+struct TokenCase {
+  static constexpr lexerv2::TokenType kTokenType = token_type;
+};
+
+/**
+ * Syntactic sugar.
+ *
+ * @note It's like when you put sugar in your porridge. You hate sugar,
+ * but you hate porridge more. It's still tastes awfull, but now you can eat it,
+ * at least.
+ *
+ * This function matches cases against current token's type.
+ * If match found, node of type AstNode is created and all Attrs from ecs
+ * are copied from token to new node.
+ *
+ * Else ErrorNode is created, TokenStart and TokenStop are copied and
+ * ErrorMessage set to error_msg.
+ */
+template <typename... Cases>
+[[nodiscard]] nodes::NodesVariant TokenToNode(lexerv2::Token& token,
+                                              std::string error_msg) {
+  nodes::NodesVariant result(std::unique_ptr<nodes::BaseNode>(nullptr));
+  lexerv2::TokenType token_type = token.GetType();
+
+  auto token_creator = [&result, &token]<lexerv2::TokenType token_type,
+                                         typename AstNode,
+                                         typename... Attrs>(
+                           TokenCase<token_type, AstNode, Attrs...>) -> void {
+    auto tmp = std::make_unique<AstNode>();
+    MoveAttributes<Attrs...>(*tmp, token);
+    result = std::move(tmp);
+  };
+
+  bool success =
+      ((token_type == Cases::kTokenType ? (token_creator(Cases{}), true)
+                                        : false) ||
+       ...);
+
+  if (success) {
+    return result;
+  }
+
+  auto tmp = std::make_unique<nodes::ErrorNode>();
+
+  tmp->Healthy() = false;
+  success = false;
+
+  ecs::Set<ecs::ErrorMessage>(*tmp, error_msg);
+  MoveAttributes<ecs::TokenStart, ecs::TokenStop>(*tmp, token);
+
+  return tmp;
+};
 
 class Parser {
  public:
-  explicit Parser(std::vector<lexer::Lexer::TokenVariant> input);
-  auto Parse() -> AstNode;
+  [[nodiscard]] explicit Parser(std::vector<lexerv2::Token> input);
+  [[nodiscard]] nodes::NodesVariant Parse();
 
  private:
-  auto ParseFunctionDefinition() -> AstNode;
-  auto ParseTypeDeclaration() -> AstNode;
-  auto ParseName() -> AstNode;
-  auto ParseParameterList() -> AstNode;
-  auto ParseParameterDecl() -> AstNode;
-  auto ParseBlockStatement() -> AstNode;
-  auto ParseStatement() -> AstNode;
-  auto ParseVariableDefinition() -> AstNode;
-  auto ParseIfStatement() -> AstNode;
-  auto ParseWhileStatement() -> AstNode;
-  auto ParseReturnStatement() -> AstNode;
-  auto ParseAssignmentOrCall() -> AstNode;
-  auto ParseAssignment(AstNode locator) -> AstNode;
-  auto ParseCallStatement(AstNode locator) -> AstNode;
-  auto ParseLocator() -> AstNode;
-  auto ParseExpression() -> AstNode;
-  auto ParseLogExpr() -> AstNode;
-  auto ParseComparExpr() -> AstNode;
-  auto ParseAddExpr() -> AstNode;
-  auto ParseMulExpr() -> AstNode;
-  auto ParseUnaryExpr() -> AstNode;
-  auto ParseLogNotExpr() -> AstNode;
-  auto ParsePrimaryExpr() -> AstNode;
-  auto ParseLiteral() -> AstNode;
-  auto ParseLocatorOrCall() -> AstNode;
-
-  auto ParseCallSuffix(AstNode& call) -> bool;
+  [[nodiscard]] nodes::NodesVariant ParseFunctionDefinition();
+  [[nodiscard]] nodes::NodesVariant ParseTypeDeclaration();
+  [[nodiscard]] nodes::NodesVariant ParseName();
+  [[nodiscard]] nodes::NodesVariant ParseParameterList();
+  [[nodiscard]] nodes::NodesVariant ParseParameterDecl();
+  [[nodiscard]] nodes::NodesVariant ParseBlockStatement();
+  void TryFixStatement(nodes::NodesVariant& result);
+  [[nodiscard]] nodes::NodesVariant ParseStatement();
+  [[nodiscard]] nodes::NodesVariant ParseVariableDefinition();
+  [[nodiscard]] nodes::NodesVariant ParseIfStatement();
+  [[nodiscard]] nodes::NodesVariant ParseWhileStatement();
+  [[nodiscard]] nodes::NodesVariant ParseReturnStatement();
+  [[nodiscard]] nodes::NodesVariant ParseAssignmentOrCall();
+  [[nodiscard]] nodes::NodesVariant ParseAssignment(
+      nodes::NodesVariant&& locator);
+  [[nodiscard]] nodes::NodesVariant ParseCallStatement(
+      nodes::NodesVariant&& locator);
+  [[nodiscard]] nodes::NodesVariant ParseLocator();
+  [[nodiscard]] nodes::NodesVariant ParseExpression();
+  [[nodiscard]] nodes::NodesVariant ParseLogExpr();
+  [[nodiscard]] nodes::NodesVariant ParseComparExpr();
+  [[nodiscard]] nodes::NodesVariant ParseAddExpr();
+  [[nodiscard]] nodes::NodesVariant ParseMulExpr();
+  [[nodiscard]] nodes::NodesVariant ParseUnaryExpr();
+  [[nodiscard]] nodes::NodesVariant ParseLogNotExpr();
+  [[nodiscard]] nodes::NodesVariant ParsePrimaryExpr();
+  [[nodiscard]] nodes::NodesVariant ParseLiteral();
+  [[nodiscard]] nodes::NodesVariant ParseLocatorOrCall();
+  [[nodiscard]] nodes::NodesVariant ParseCallSuffix();
 
   void NextToken();
 
-  template <typename... Tokens>
-  auto SkipUntil() -> bool;
+  template <lexerv2::TokenType... tokens>
+  bool SkipUntil() ;
 
-  template <typename... Tokens>
-  auto Consume() -> bool;
+  template <lexerv2::TokenType... tokens>
+  bool Consume() ;
 
-  template <typename... Tokens>
-  auto Lookup() -> bool;
+  template <lexerv2::TokenType... tokens>
+  [[nodiscard]] bool Lookup() ;
 
-  std::vector<lexer::Lexer::TokenVariant> input_;
-  lexer::Lexer::TokenVariant cur_token_;
+  std::vector<lexerv2::Token> input_;
+  lexerv2::Token cur_token_;
   std::size_t next_token_index_{1};
 };
 
-Parser::Parser(std::vector<lexer::Lexer::TokenVariant> input)
+Parser::Parser(std::vector<lexerv2::Token> input)
     : input_(std::move(input)), cur_token_(input_[0]) {};
 
-auto Parser::Parse() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::Program{}, .has_active_error = false, .children = {}};
+nodes::NodesVariant Parser::Parse() {
+  auto result = std::make_unique<nodes::Program>();
 
-  while (!Lookup<lexer::tokens::EofToken>()) {
-    bool success = PushCheckErr(result, ParseFunctionDefinition()) or
-                   SkipUntil<lexer::tokens::Keyword_char,
-                             lexer::tokens::Keyword_int,
-                             lexer::tokens::Keyword_uint,
-                             lexer::tokens::Keyword_float>();
-    result.has_active_error |= !success;
+  while (!Lookup<lexerv2::TokenType::kEofToken>()) {
+    bool success =
+        PushCheckErr(result->Children(), ParseFunctionDefinition()) or
+        SkipUntil<lexerv2::TokenType::kKwchar,
+                  lexerv2::TokenType::kKwint,
+                  lexerv2::TokenType::kKwuint,
+                  lexerv2::TokenType::kKwfloat>();
+    result->Healthy() &= success;
   }
 
   return result;
 }
 
-auto Parser::ParseFunctionDefinition() -> AstNode {
-  auto result = AstNode{.token = tokens::FunctionDefinition{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseFunctionDefinition() {
+  auto result = std::make_unique<nodes::FunctionDefinition>();
 
-  bool success = PushCheckErr(result, ParseTypeDeclaration()) and
-                 PushCheckErr(result, ParseName()) and
-                 PushCheckErr(result, ParseParameterList()) and
-                 PushCheckErr(result, ParseBlockStatement());
-  result.has_active_error = !success;
+  bool success =
+      StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
+      StoreCheckErr(result->Children()[1], ParseName()) and
+      StoreCheckErr(result->Children()[2], ParseParameterList()) and
+      StoreCheckErr(result->Children()[3], ParseBlockStatement());
+
+  result->Healthy() &= success;
 
   return result;
 }
 
-auto Parser::ParseTypeDeclaration() -> AstNode {
-  auto result = AstNode{.token = tokens::TypeDeclaration{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseTypeDeclaration() {
+  auto result = std::make_unique<nodes::TypeDeclaration>();
 
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::Keyword_char, tokens::KeywordChar>,
-      utils::TypeTuple<lexer::tokens::Keyword_int, tokens::KeywordInt>,
-      utils::TypeTuple<lexer::tokens::Keyword_uint, tokens::KeywordUint>,
-      utils::TypeTuple<lexer::tokens::Keyword_float, tokens::KeywordFloat>>
-      visitor("expected type");
+  // clang-format off
+  auto child = TokenToNode<
+    TokenCase<lexerv2::TokenType::kKwchar, nodes::KeywordChar, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kKwint, nodes::KeywordInt, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kKwuint, nodes::KeywordUint, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kKwfloat, nodes::KeywordFloat, ecs::TokenStart, ecs::TokenStop>
+  >(cur_token_, "expected type");
+  // clang-format on
 
-  auto tmp = std::visit(visitor, cur_token_);
-
-  bool success = PushCheckErr(result, std::move(tmp));
-  result.has_active_error = !success;
+  bool success = StoreCheckErr(result->Children()[0], std::move(child));
+  result->Healthy() &= success;
 
   NextToken();
+
   return result;
 }
 
-auto Parser::ParseName() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::Name{}, .has_active_error = false, .children = {}};
+nodes::NodesVariant Parser::ParseName() {
+  auto result = std::make_unique<nodes::Name>();
 
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop, ecs::IdName>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::IdToken, tokens::IdToken>>
-      visitor("expected id");
+  // clang-format off
+  auto child = TokenToNode<
+    TokenCase<lexerv2::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
+  >(cur_token_, "expected id");
+  // clang-format on
 
-  auto tmp = std::visit(visitor, cur_token_);
-
-  bool success = PushCheckErr(result, std::move(tmp));
-
-  result.has_active_error = !success;
+  bool success = StoreCheckErr(result->Children()[0], std::move(child));
+  result->Healthy() &= success;
 
   NextToken();
+
   return result;
 }
 
-auto Parser::ParseParameterList() -> AstNode {
-  auto result = AstNode{.token = tokens::ParameterList{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseParameterList() {
+  auto result = std::make_unique<nodes::ParameterList>();
 
-  bool success = Consume<lexer::tokens::SyntaxLparent>() and
-                 (Lookup<lexer::tokens::SyntaxRparent>()
-                      ? true
-                      : (PushCheckErr(result, ParseParameterDecl()) or
-                         SkipUntil<lexer::tokens::SyntaxRparent,
-                                   lexer::tokens::SyntaxComma>()));
+  bool success =
+      Consume<lexerv2::TokenType::kSyntLparent>() and
+      (Lookup<lexerv2::TokenType::kSyntRparent>()
+           ? true
+           : (PushCheckErr(result->Children(), ParseParameterDecl()) or
+              SkipUntil<lexerv2::TokenType::kSyntRparent,
+                        lexerv2::TokenType::kSyntComma>()));
 
-  while (success && Lookup<lexer::tokens::SyntaxComma>()) {
-    success &=
-        Consume<lexer::tokens::SyntaxComma>() and
-        (PushCheckErr(result, ParseParameterDecl()) or
-         SkipUntil<lexer::tokens::SyntaxRparent, lexer::tokens::SyntaxComma>());
+  while (success && Lookup<lexerv2::TokenType::kSyntComma>()) {
+    success &= Consume<lexerv2::TokenType::kSyntComma>() and
+               (PushCheckErr(result->Children(), ParseParameterDecl()) or
+                SkipUntil<lexerv2::TokenType::kSyntRparent,
+                          lexerv2::TokenType::kSyntComma>());
   }
 
-  success &= Consume<lexer::tokens::SyntaxRparent>();
+  success &= Consume<lexerv2::TokenType::kSyntRparent>();
 
-  result.has_active_error = !success;
-
-  return result;
-}
-
-auto Parser::ParseParameterDecl() -> AstNode {
-  auto result = AstNode{.token = tokens::ParameterDecl{},
-                        .has_active_error = false,
-                        .children = {}};
-
-  bool success = PushCheckErr(result, ParseTypeDeclaration()) and
-                 PushCheckErr(result, ParseName());
-
-  result.has_active_error = !success;
+  result->Healthy() &= success;
 
   return result;
 }
 
-auto Parser::ParseBlockStatement() -> AstNode {
-  bool success = Consume<lexer::tokens::SyntaxLbrace>();
-  std::vector<AstNode> stmts;
+nodes::NodesVariant Parser::ParseParameterDecl() {
+  auto result = std::make_unique<nodes::ParameterDecl>();
 
-  while (success && !Lookup<lexer::tokens::SyntaxRbrace>()) {
-    stmts.push_back(ParseStatement());
-    success &= !stmts.back().has_active_error;
+  bool success =
+      StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
+      StoreCheckErr(result->Children()[1], ParseName());
 
-    if (!success) {
-      success |= SkipUntil<lexer::tokens::SyntaxRbrace>();
-    }
+  result->Healthy() &= success;
+
+  return result;
+}
+
+nodes::NodesVariant Parser::ParseBlockStatement() {
+  bool success = Consume<lexerv2::TokenType::kSyntLbrace>();
+  std::vector<nodes::NodesVariant> stmts;
+
+  while (success && !Lookup<lexerv2::TokenType::kSyntRbrace>()) {
+    success &= PushCheckErr(stmts, ParseStatement()) or
+               SkipUntil<lexerv2::TokenType::kSyntRbrace>();
   }
 
-  success &= Consume<lexer::tokens::SyntaxRbrace>();
+  success &= Consume<lexerv2::TokenType::kSyntRbrace>();
 
   if (stmts.size() == 1) {
     auto result = std::move(stmts.back());
-
-    result.has_active_error = !success;
+    std::visit([success](auto& ptr) -> void { ptr->Healthy() &= success; },
+               result);
     return result;
   }
 
-  auto result = AstNode{.token = tokens::BlockStatement{},
-                        .has_active_error = !success,
-                        .children = std::move(stmts)};
-
+  auto result = std::make_unique<nodes::BlockStatement>();
+  result->Children() = std::move(stmts);
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseStatement() -> AstNode {
-  if (Lookup<lexer::tokens::Keyword_if>()) {
+void Parser::TryFixStatement(nodes::NodesVariant& result) {
+  bool success = IsHealthy(result);
+
+  if (!success) {
+    success = SkipUntil<lexerv2::TokenType::kSyntSemicolon,
+                        lexerv2::TokenType::kSyntRbrace>() and
+              Consume<lexerv2::TokenType::kSyntSemicolon>();
+  }
+
+  SetHealthy(result, success);
+}
+
+nodes::NodesVariant Parser::ParseStatement() {
+  if (Lookup<lexerv2::TokenType::kKwif>()) {
     return ParseIfStatement();
   }
 
-  if (Lookup<lexer::tokens::Keyword_while>()) {
+  if (Lookup<lexerv2::TokenType::kKwwhile>()) {
     return ParseWhileStatement();
   }
 
-  if (Lookup<lexer::tokens::Keyword_return>()) {
+  if (Lookup<lexerv2::TokenType::kKwreturn>()) {
     auto result = ParseReturnStatement();
-    bool success = !result.has_active_error;
-
-    if (!success) {
-      success = SkipUntil<lexer::tokens::SyntaxSemicolon,
-                          lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxSemicolon>();
-    }
-
-    result.has_active_error = !success;
+    TryFixStatement(result);
     return result;
   }
 
-  if (Lookup<lexer::tokens::Keyword_char,
-             lexer::tokens::Keyword_int,
-             lexer::tokens::Keyword_uint,
-             lexer::tokens::Keyword_float>()) {
+  if (Lookup<lexerv2::TokenType::kKwchar,
+             lexerv2::TokenType::kKwint,
+             lexerv2::TokenType::kKwuint,
+             lexerv2::TokenType::kKwfloat>()) {
 
     auto result = ParseVariableDefinition();
-    bool success = !result.has_active_error;
-
-    if (!success) {
-      success = SkipUntil<lexer::tokens::SyntaxSemicolon,
-                          lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxSemicolon>();
-    }
-
-    result.has_active_error = !success;
+    TryFixStatement(result);
     return result;
   }
 
-  if (Lookup<lexer::tokens::IdToken>()) {
+  if (Lookup<lexerv2::TokenType::kIdToken>()) {
     auto result = ParseAssignmentOrCall();
-    bool success = !result.has_active_error;
-
-    if (!success) {
-      success = SkipUntil<lexer::tokens::SyntaxSemicolon,
-                          lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxSemicolon>();
-    }
-
-    result.has_active_error = !success;
+    TryFixStatement(result);
     return result;
   }
 
-  auto tok = tokens::ErrorToken{};
-  auto result = AstNode{.token = tok, .has_active_error = true, .children = {}};
-  ecs::Set<ecs::ErrorMessage>(tok, std::string("expected statement"));
+  auto result = std::make_unique<nodes::ErrorNode>();
+  ecs::Set<ecs::ErrorMessage>(*result, std::string("expected statement"));
 
   NextToken();
 
   return result;
 }
 
-auto Parser::ParseVariableDefinition() -> AstNode {
-  auto result = AstNode{.token = tokens::VariableDefinition{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseVariableDefinition() {
+  auto result = std::make_unique<nodes::VariableDefinition>();
 
-  bool success = PushCheckErr(result, ParseTypeDeclaration()) and
-                 PushCheckErr(result, ParseName()) and
-                 Consume<lexer::tokens::BinAssign>() and
-                 PushCheckErr(result, ParseExpression()) and
-                 Consume<lexer::tokens::SyntaxSemicolon>();
+  bool success =
+      StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
+      StoreCheckErr(result->Children()[1], ParseName()) and
+      Consume<lexerv2::TokenType::kBinAssign>() and
+      StoreCheckErr(result->Children()[2], ParseExpression()) and
+      Consume<lexerv2::TokenType::kSyntSemicolon>();
 
-  result.has_active_error = !success;
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseIfStatement() -> AstNode {
-  auto result = AstNode{.token = tokens::IfStatement{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseIfStatement() {
+  auto result = std::make_unique<nodes::IfStatement>();
 
-  bool success = Consume<lexer::tokens::Keyword_if>() and
-                 PushCheckErr(result, ParseExpression()) and
-                 PushCheckErr(result, ParseBlockStatement());
+  bool success = Consume<lexerv2::TokenType::kKwif>() and
+                 StoreCheckErr(result->Children()[0], ParseExpression()) and
+                 StoreCheckErr(result->Children()[1], ParseBlockStatement());
 
-  while (Lookup<lexer::tokens::Keyword_else>()) {
-    success &= Consume<lexer::tokens::Keyword_else>();
+  if (Lookup<lexerv2::TokenType::kKwelse>()) {
+    success &= Consume<lexerv2::TokenType::kKwelse>();
 
-    if (Lookup<lexer::tokens::Keyword_if>()) {
-      success &= PushCheckErr(result, ParseIfStatement());
+    if (Lookup<lexerv2::TokenType::kKwif>()) {
+      success &= StoreCheckErr(result->Children()[2], ParseIfStatement());
     } else {
-      success &= PushCheckErr(result, ParseBlockStatement());
+      success &= StoreCheckErr(result->Children()[2], ParseBlockStatement());
     }
   }
 
-  result.has_active_error = !success;
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseWhileStatement() -> AstNode {
-  auto result = AstNode{.token = tokens::WhileStatement{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseWhileStatement() {
+  auto result = std::make_unique<nodes::WhileStatement>();
 
-  bool success = Consume<lexer::tokens::Keyword_while>() and
-                 PushCheckErr(result, ParseExpression()) and
-                 PushCheckErr(result, ParseBlockStatement());
+  bool success = Consume<lexerv2::TokenType::kKwwhile>() and
+                 StoreCheckErr(result->Children()[0], ParseExpression()) and
+                 StoreCheckErr(result->Children()[1], ParseBlockStatement());
 
-  result.has_active_error = !success;
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseReturnStatement() -> AstNode {
-  auto result = AstNode{.token = tokens::ReturnStatement{},
-                        .has_active_error = false,
-                        .children = {}};
+nodes::NodesVariant Parser::ParseReturnStatement() {
+  auto result = std::make_unique<nodes::ReturnStatement>();
 
-  bool success = Consume<lexer::tokens::Keyword_return>();
+  bool success = Consume<lexerv2::TokenType::kKwreturn>();
 
-  if (!Lookup<lexer::tokens::SyntaxSemicolon>()) {
-    success &= PushCheckErr(result, ParseExpression());
+  if (!Lookup<lexerv2::TokenType::kSyntSemicolon>()) {
+    success &= StoreCheckErr(result->Children()[0], ParseExpression());
   }
 
-  success &= Consume<lexer::tokens::SyntaxSemicolon>();
+  success &= Consume<lexerv2::TokenType::kSyntSemicolon>();
 
-  result.has_active_error = !success;
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseAssignmentOrCall() -> AstNode {
+nodes::NodesVariant Parser::ParseAssignmentOrCall() {
   auto locator = ParseLocator();
 
-  if (Lookup<lexer::tokens::SyntaxLparent>()) {
+  if (Lookup<lexerv2::TokenType::kSyntLparent>()) {
     return ParseCallStatement(std::move(locator));
   }
 
   return ParseAssignment(std::move(locator));
 }
 
-auto Parser::ParseAssignment(AstNode locator) -> AstNode {
-  auto result = AstNode{
-      .token = tokens::Assignment{}, .has_active_error = false, .children = {}};
+auto Parser::ParseAssignment(nodes::NodesVariant&& locator)
+    -> nodes::NodesVariant {
+  auto result = std::make_unique<nodes::Assignment>();
 
-  bool success = PushCheckErr(result, std::move(locator)) and
-                 Consume<lexer::tokens::BinAssign>() and
-                 PushCheckErr(result, ParseExpression()) and
-                 Consume<lexer::tokens::SyntaxSemicolon>();
+  bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
+                 Consume<lexerv2::TokenType::kBinAssign>() and
+                 StoreCheckErr(result->Children()[1], ParseExpression()) and
+                 Consume<lexerv2::TokenType::kSyntSemicolon>();
 
-  result.has_active_error = !success;
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseCallStatement(AstNode locator) -> AstNode {
-  auto result = AstNode{.token = tokens::CallStatement{},
-                        .has_active_error = false,
-                        .children = {}};
+auto Parser::ParseCallStatement(nodes::NodesVariant&& locator)
+    -> nodes::NodesVariant {
+  auto result = std::make_unique<nodes::CallStatement>();
 
-  bool success = PushCheckErr(result, std::move(locator)) and
-                 ParseCallSuffix(result) and
-                 Consume<lexer::tokens::SyntaxSemicolon>();
+  bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
+                 StoreCheckErr(result->Children()[1], ParseCallSuffix()) and
+                 Consume<lexerv2::TokenType::kSyntSemicolon>();
 
-  result.has_active_error = !success;
-
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseLocator() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::Locator{}, .has_active_error = false, .children = {}};
+nodes::NodesVariant Parser::ParseLocator() {
+  auto result = std::make_unique<nodes::Locator>();
 
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop, ecs::IdName>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::IdToken, tokens::IdToken>>
-      visitor("expected id");
+  // clang-format off
+  auto child = TokenToNode<
+    TokenCase<lexerv2::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
+  >(cur_token_, "expected id");
+  // clang-format on
 
-  auto tmp = std::visit(visitor, cur_token_);
+  bool success = StoreCheckErr(result->Children()[0], std::move(child));
 
-  bool success = PushCheckErr(result, std::move(tmp));
-
-  result.has_active_error = !success;
+  result->Healthy() &= success;
 
   NextToken();
+
   return result;
 }
 
-auto Parser::ParseExpression() -> AstNode { return ParseLogExpr(); }
+nodes::NodesVariant Parser::ParseExpression() { return ParseLogExpr(); }
 
-auto Parser::ParseLogExpr() -> AstNode {
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::BinLogicalAnd, tokens::LogAnd>,
-      utils::TypeTuple<lexer::tokens::BinLogicalOr, tokens::LogOr>>
-      visitor("expected && or ||");
+nodes::NodesVariant Parser::ParseLogExpr() {
+  // clang-format off
+  auto node_creator = &TokenToNode<
+    TokenCase<lexerv2::TokenType::kBinLogicalOr, nodes::LogOr, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinLogicalAnd, nodes::LogAnd, ecs::TokenStart, ecs::TokenStop>
+  >;
+  // clang-format on
 
   auto last_node = ParseComparExpr();
-  bool success = !last_node.has_active_error;
+  bool success = IsHealthy(last_node);
 
-  while (success &&
-         Lookup<lexer::tokens::BinLogicalAnd, lexer::tokens::BinLogicalOr>()) {
-    auto tmp = std::visit(visitor, cur_token_);
-    tmp.children.push_back(std::move(last_node));
+  while (success && Lookup<lexerv2::TokenType::kBinLogicalAnd,
+                           lexerv2::TokenType::kBinLogicalOr>()) {
+    auto tmp = node_creator(cur_token_, "expected && or ||");
+    StoreChild<0>(tmp, std::move(last_node));
     last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(last_node, ParseComparExpr());
+
+    success &= StoreChild<1>(last_node, ParseComparExpr());
   }
 
-  last_node.has_active_error = !success;
+  SetHealthy(last_node, success);
   return last_node;
 }
 
-auto Parser::ParseComparExpr() -> AstNode {
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::BinEq, tokens::BinEq>,
-      utils::TypeTuple<lexer::tokens::BinNeq, tokens::BinNeq>,
-      utils::TypeTuple<lexer::tokens::BinLt, tokens::BinLt>,
-      utils::TypeTuple<lexer::tokens::BinLeq, tokens::BinLeq>,
-      utils::TypeTuple<lexer::tokens::BinGt, tokens::BinGt>,
-      utils::TypeTuple<lexer::tokens::BinGeq, tokens::BinGeq>>
-      visitor("expected comparison operator");
+nodes::NodesVariant Parser::ParseComparExpr() {
+  // clang-format off
+  auto node_creator = &TokenToNode<
+    TokenCase<lexerv2::TokenType::kBinEq, nodes::BinEq, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinNeq, nodes::BinNeq, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinLt, nodes::BinLt, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinLeq, nodes::BinLeq, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinGt, nodes::BinGt, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinGeq, nodes::BinGeq, ecs::TokenStart, ecs::TokenStop>
+  >;
+  // clang-format on
 
   auto last_node = ParseAddExpr();
-  bool success = !last_node.has_active_error;
+  bool success = IsHealthy(last_node);
 
-  while (success && Lookup<lexer::tokens::BinEq,
-                           lexer::tokens::BinNeq,
-                           lexer::tokens::BinLt,
-                           lexer::tokens::BinLeq,
-                           lexer::tokens::BinGt,
-                           lexer::tokens::BinGeq>()) {
-    auto tmp = std::visit(visitor, cur_token_);
-    tmp.children.push_back(std::move(last_node));
+  while (success && Lookup<lexerv2::TokenType::kBinEq,
+                           lexerv2::TokenType::kBinNeq,
+                           lexerv2::TokenType::kBinLt,
+                           lexerv2::TokenType::kBinLeq,
+                           lexerv2::TokenType::kBinGt,
+                           lexerv2::TokenType::kBinGeq>()) {
+    auto tmp = node_creator(cur_token_, "expected comparison operator");
+    StoreChild<0>(tmp, std::move(last_node));
     last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(last_node, ParseAddExpr());
+
+    success &= StoreChild<1>(last_node, ParseAddExpr());
   }
 
-  last_node.has_active_error = !success;
+  SetHealthy(last_node, success);
   return last_node;
 }
 
-auto Parser::ParseAddExpr() -> AstNode {
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::BinPlus, tokens::BinPlus>,
-      utils::TypeTuple<lexer::tokens::BinMinus, tokens::BinMinus>>
-      visitor("expected + or -");
+nodes::NodesVariant Parser::ParseAddExpr() {
+  // clang-format off
+  auto node_creator = &TokenToNode<
+    TokenCase<lexerv2::TokenType::kBinPlus, nodes::BinPlus, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinMinus, nodes::BinMinus, ecs::TokenStart, ecs::TokenStop>
+  >;
+  // clang-format on
 
   auto last_node = ParseMulExpr();
-  bool success = !last_node.has_active_error;
+  bool success = IsHealthy(last_node);
 
-  while (success && Lookup<lexer::tokens::BinPlus, lexer::tokens::BinMinus>()) {
-    auto tmp = std::visit(visitor, cur_token_);
-    tmp.children.push_back(std::move(last_node));
+  while (
+      success &&
+      Lookup<lexerv2::TokenType::kBinPlus, lexerv2::TokenType::kBinMinus>()) {
+    auto tmp = node_creator(cur_token_, "expected + or -");
+    StoreChild<0>(tmp, std::move(last_node));
     last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(last_node, ParseMulExpr());
+
+    success &= StoreChild<1>(last_node, ParseMulExpr());
   }
 
-  last_node.has_active_error = !success;
+  SetHealthy(last_node, success);
   return last_node;
 }
 
-auto Parser::ParseMulExpr() -> AstNode {
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart, ecs::TokenStop>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::BinMul, tokens::BinMul>,
-      utils::TypeTuple<lexer::tokens::BinDiv, tokens::BinDiv>,
-      utils::TypeTuple<lexer::tokens::BinMod, tokens::BinMod>>
-      visitor("expected *, / or %");
+nodes::NodesVariant Parser::ParseMulExpr() {
+  // clang-format off
+  auto node_creator = &TokenToNode<
+    TokenCase<lexerv2::TokenType::kBinMul, nodes::BinMul, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinDiv, nodes::BinDiv, ecs::TokenStart, ecs::TokenStop>,
+    TokenCase<lexerv2::TokenType::kBinMod, nodes::BinMod, ecs::TokenStart, ecs::TokenStop>
+  >;
+  // clang-format on
 
   auto last_node = ParseUnaryExpr();
-  bool success = !last_node.has_active_error;
+  bool success = IsHealthy(last_node);
 
-  while (success && Lookup<lexer::tokens::BinMul,
-                           lexer::tokens::BinDiv,
-                           lexer::tokens::BinMod>()) {
-    auto tmp = std::visit(visitor, cur_token_);
-    tmp.children.push_back(std::move(last_node));
+  while (success && Lookup<lexerv2::TokenType::kBinMul,
+                           lexerv2::TokenType::kBinDiv,
+                           lexerv2::TokenType::kBinMod>()) {
+    auto tmp = node_creator(cur_token_, "expected *, / or %");
+    StoreChild<0>(tmp, std::move(last_node));
     last_node = std::move(tmp);
     NextToken();
-    success &= PushCheckErr(last_node, ParseUnaryExpr());
+
+    success &= StoreChild<1>(last_node, ParseUnaryExpr());
   }
 
-  last_node.has_active_error = !success;
+  SetHealthy(last_node, success);
   return last_node;
 }
 
-auto Parser::ParseUnaryExpr() -> AstNode {
-  if (Lookup<lexer::tokens::UnLogicalNot>()) {
+nodes::NodesVariant Parser::ParseUnaryExpr() {
+  if (Lookup<lexerv2::TokenType::kUnLogicalNot>()) {
     return ParseLogNotExpr();
   }
 
   return ParsePrimaryExpr();
 }
 
-auto Parser::ParseLogNotExpr() -> AstNode {
-  auto result = AstNode{
-      .token = tokens::LogNotExpr{}, .has_active_error = false, .children = {}};
+nodes::NodesVariant Parser::ParseLogNotExpr() {
+  auto result = std::make_unique<nodes::LogNotExpr>();
 
-  bool success = Consume<lexer::tokens::UnLogicalNot>() and
-                 PushCheckErr(result, ParsePrimaryExpr());
+  bool success = Consume<lexerv2::TokenType::kUnLogicalNot>() and
+                 StoreCheckErr(result->Children()[0], ParsePrimaryExpr());
 
-  result.has_active_error = !success;
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParsePrimaryExpr() -> AstNode {
-  if (Lookup<lexer::tokens::SyntaxLparent>()) {
-    Consume<lexer::tokens::SyntaxLparent>();
+nodes::NodesVariant Parser::ParsePrimaryExpr() {
+  if (Lookup<lexerv2::TokenType::kSyntLparent>()) {
+    Consume<lexerv2::TokenType::kSyntLparent>();
 
     auto result = ParseExpression();
-    bool success = !result.has_active_error;
+
+    bool success = IsHealthy(result);
 
     if (success) {
-      success &= Consume<lexer::tokens::SyntaxRparent>();
+      success &= Consume<lexerv2::TokenType::kSyntRparent>();
     }
 
     if (!success) {
-      success = SkipUntil<lexer::tokens::SyntaxRparent,
-                          lexer::tokens::SyntaxSemicolon,
-                          lexer::tokens::SyntaxRbrace>() and
-                Consume<lexer::tokens::SyntaxRparent>();
+      success = SkipUntil<lexerv2::TokenType::kSyntRparent,
+                          lexerv2::TokenType::kSyntSemicolon,
+                          lexerv2::TokenType::kSyntRbrace>() and
+                Consume<lexerv2::TokenType::kSyntRparent>();
     }
 
-    result.has_active_error = !success;
+    SetHealthy(result, success);
+
     return result;
   }
 
-  if (Lookup<lexer::tokens::IdToken>()) {
+  if (Lookup<lexerv2::TokenType::kIdToken>()) {
     return ParseLocatorOrCall();
   }
 
   return ParseLiteral();
 }
 
-auto Parser::ParseLocatorOrCall() -> AstNode {
+nodes::NodesVariant Parser::ParseLocatorOrCall() {
   auto locator = ParseLocator();
 
-  if (!Lookup<lexer::tokens::SyntaxLparent>()) {
+  if (!Lookup<lexerv2::TokenType::kSyntLparent>()) {
     return locator;
   }
 
-  auto result = AstNode{.token = tokens::CallExpression{},
-                        .has_active_error = false,
-                        .children = {}};
+  auto result = std::make_unique<nodes::CallExpression>();
 
-  bool success =
-      PushCheckErr(result, std::move(locator)) and ParseCallSuffix(result);
-  result.has_active_error = !success;
+  bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
+                 StoreCheckErr(result->Children()[1], ParseCallSuffix());
+
+  result->Healthy() &= success;
   return result;
 }
 
-auto Parser::ParseCallSuffix(AstNode& call) -> bool {
-  bool success = Consume<lexer::tokens::SyntaxLparent>() and
-                 (Lookup<lexer::tokens::SyntaxRparent>()
+nodes::NodesVariant Parser::ParseCallSuffix() {
+  auto result = std::make_unique<nodes::CallSuffix>();
+  bool success = Consume<lexerv2::TokenType::kSyntLparent>() and
+                 (Lookup<lexerv2::TokenType::kSyntRparent>()
                       ? true
-                      : (PushCheckErr(call, ParseExpression()) or
-                         SkipUntil<lexer::tokens::SyntaxRparent,
-                                   lexer::tokens::SyntaxComma>()));
+                      : (PushCheckErr(result->Children(), ParseExpression()) or
+                         SkipUntil<lexerv2::TokenType::kSyntRparent,
+                                   lexerv2::TokenType::kSyntComma>()));
 
-  while (success && Lookup<lexer::tokens::SyntaxComma>()) {
-    success &=
-        Consume<lexer::tokens::SyntaxComma>() and
-        (PushCheckErr(call, ParseExpression()) or
-         SkipUntil<lexer::tokens::SyntaxRparent, lexer::tokens::SyntaxComma>());
+  while (success && Lookup<lexerv2::TokenType::kSyntComma>()) {
+    success &= Consume<lexerv2::TokenType::kSyntComma>() and
+               (PushCheckErr(result->Children(), ParseExpression()) or
+                SkipUntil<lexerv2::TokenType::kSyntRparent,
+                          lexerv2::TokenType::kSyntComma>());
   }
 
-  success &= Consume<lexer::tokens::SyntaxRparent>();
+  success &= Consume<lexerv2::TokenType::kSyntRparent>();
 
-  return success;
+  result->Healthy() &= success;
+  return result;
 }
 
-auto Parser::ParseLiteral() -> AstNode {
-  ParserVisitor<
-      // Attrs
-      utils::TypeTuple<ecs::TokenStart,
-                       ecs::TokenStop,
-                       ecs::IntValue,
-                       ecs::FloatValue,
-                       ecs::StrValue>,
-      // Tokens
-      utils::TypeTuple<lexer::tokens::Int, tokens::IntLiteral>,
-      utils::TypeTuple<lexer::tokens::Float, tokens::FloatLiteral>,
-      utils::TypeTuple<lexer::tokens::String, tokens::StrLiteral>>
-      visitor("expected literal");
+nodes::NodesVariant Parser::ParseLiteral() {
+  // clang-format off
+  auto res = TokenToNode<
+    TokenCase<lexerv2::TokenType::kIntLiteral, nodes::IntLiteral, ecs::IntValue>,
+    TokenCase<lexerv2::TokenType::kFloatLiteral, nodes::FloatLiteral, ecs::FloatValue>,
+    TokenCase<lexerv2::TokenType::kStringLiteral, nodes::StrLiteral, ecs::StrValue>
+  >(cur_token_, "expected literal");
+  // clang-format on
 
-  auto res = std::visit(visitor, cur_token_);
-
-  if (!res.has_active_error) {
+  if (IsHealthy(res)) {
     NextToken();
   }
 
@@ -703,14 +706,14 @@ void Parser::NextToken() {
   cur_token_ = input_[next_token_index_++];
 }
 
-template <typename... Tokens>
-auto Parser::SkipUntil() -> bool {
+template <lexerv2::TokenType... tokens>
+bool Parser::SkipUntil() {
   while (true) {
-    if ((std::holds_alternative<Tokens>(cur_token_) || ...)) {
+    if (Lookup<tokens...>()) {
       return true;
     }
 
-    if (std::holds_alternative<lexer::tokens::EofToken>(cur_token_)) {
+    if (Lookup<lexerv2::TokenType::kEofToken>()) {
       return false;
     }
 
@@ -720,9 +723,9 @@ auto Parser::SkipUntil() -> bool {
 }
 
 // TODO error report (probably just print, no error tokens)
-template <typename... Tokens>
-auto Parser::Consume() -> bool {
-  if (Lookup<Tokens...>()) {
+template <lexerv2::TokenType... tokens>
+bool Parser::Consume() {
+  if (Lookup<tokens...>()) {
     NextToken();
     return true;
   }
@@ -730,16 +733,18 @@ auto Parser::Consume() -> bool {
   return false;
 }
 
-template <typename... Tokens>
-auto Parser::Lookup() -> bool {
-  return static_cast<bool>((std::holds_alternative<Tokens>(cur_token_) || ...));
+template <lexerv2::TokenType... tokens>
+bool Parser::Lookup() {
+  return ((cur_token_.GetType() == tokens) || ...);
 }
 
-auto Parse(std::vector<lexer::Lexer::TokenVariant> input) -> AstNode {
+}  // namespace
+
+nodes::NodesVariant Parse(std::vector<lexerv2::Token> input) {
   Parser parser(std::move(input));
   return parser.Parse();
 }
 
-}  // namespace parser
+}  // namespace parserv2
 
 // NOLINTEND(misc-no-recursion)

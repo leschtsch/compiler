@@ -1,14 +1,16 @@
 #! /usr/bin/bash
 
+rm -rf build bin docs coverage
+
 echo -e "\033[1mbuilding: \033[0m"
 
-BUILD_TYPES="Debug CodeCoverage Release"
+BUILD_TYPES="Debug CodeCoverage"
 
 for build_type in ${BUILD_TYPES}; do
 	mkdir -p build/${build_type}
 	pushd build/${build_type}
 	cmake -DCMAKE_BUILD_TYPE=${build_type} -DENABLE_TESTS=YES ../..
-	make
+	make -j 4
 	popd
 done
 

@@ -1,13 +1,14 @@
 #pragma once
 
-#include <lexer/lexer.hpp>
+#include <lexer/tokens.hpp>
 
 #include <vector>
 
 #include "ast.hpp"
 
-namespace parser {
+namespace parserv2 {
 
-auto Parse(std::vector<lexer::Lexer::TokenVariant> input) -> AstNode;
+// will hold Program*
+[[nodiscard]] nodes::NodesVariant Parse(std::vector<lexerv2::Token> input);
 
 };

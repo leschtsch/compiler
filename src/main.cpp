@@ -3,7 +3,6 @@
 
 #include <iostream>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include "lexer/lexer.hpp"
@@ -18,13 +17,13 @@ auto main() -> int {
     input += tmp + "\n";
   }
 
-  std::vector<lexer::Lexer::TokenVariant> vec_input;
-  lexer::Lexer lex(input);
+  std::vector<lexerv2::Token> vec_input;
+  lexerv2::Lexer lex(input);
 
   do {
     vec_input.push_back(lex.NextToken());
-  } while (!std::holds_alternative<lexer::tokens::EofToken>(vec_input.back()));
+  } while (vec_input.back().GetType() != lexerv2::TokenType::kEofToken);
 
-  auto ast = parser::Parse(vec_input);
-  parser::DumpAst(std::cout, ast);
+  auto ast = parserv2::Parse(vec_input);
+  parserv2::DumpAst(std::cout, ast);
 }

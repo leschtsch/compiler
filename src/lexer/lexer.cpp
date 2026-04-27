@@ -17,24 +17,17 @@
 
 #include "tokens.hpp"
 
-namespace lexer {
+namespace lexerv2 {
 
 namespace {
 
-template <typename T>
-auto CreateToken(const utils::SourcePosition& start,
-                 const utils::SourcePosition& stop) {
-  auto res = T{};
+[[nodiscard]] Token CreateToken(TokenType type,
+                                const utils::SourcePosition& start,
+                                const utils::SourcePosition& stop) {
+  auto res = Token(type);
   ecs::Set<ecs::TokenStart>(res, start);
   ecs::Set<ecs::TokenStop>(res, stop);
   return res;
-}
-
-template <typename T>
-auto CreateTokenVariant(const utils::SourcePosition& start,
-                        const utils::SourcePosition& stop)
-    -> Lexer::TokenVariant {
-  return Lexer::TokenVariant(CreateToken<T>(start, stop));
 }
 
 }  // namespace
@@ -44,7 +37,7 @@ Lexer::Lexer(std::string input) : input_(std::move(input)) {
   BuildOtherTokens();
 }
 
-auto Lexer::NextToken() -> Lexer::TokenVariant {
+Token Lexer::NextToken() {
   if (reading_string_) {
     return GetString();
   }
@@ -67,7 +60,7 @@ auto Lexer::NextToken() -> Lexer::TokenVariant {
   start_position_ = position_;
 
   if (AtEof()) {
-    return tokens::EofToken{};
+    return Token(TokenType::kEofToken);
   }
 
   if (Getchr() == '"') {
@@ -94,7 +87,37 @@ auto Lexer::NextToken() -> Lexer::TokenVariant {
   return GetNum();
 }
 
-auto Lexer::TrySkipComment() -> std::expected<bool, tokens::ErrorToken> {
+void Lexer::BuildKeywords() {
+#define KEYWORD(name) \
+  keywords_.Insert(std::string(#name), TokenType::kKw##name);
+
+#include <language_data/keywords.dat>
+
+#undef KEYWORD
+}
+
+void Lexer::BuildOtherTokens() {
+#define EXPAND(name, type, str) \
+  other_tokens_.Insert(std::string(str), TokenType::k##type##name);
+
+#define UN_OP(name, str) EXPAND(name, Un, str)
+#define BIN_OP(name, str) EXPAND(name, Bin, str)
+#define SYNT_TOKEN(name, str) EXPAND(name, Synt, str)
+
+  // clang-format off: order is important: need binary > unary
+#include <language_data/un_ops.dat>
+#include <language_data/bin_ops.dat>
+#include <language_data/synt_tokens.dat>
+  // clang-format on
+
+#undef EXPAND
+
+#undef UN_OP
+#undef BIN_OP
+#undef SYNT_TOKEN
+}
+
+std::expected<bool, Token> Lexer::TrySkipComment() {
   std::size_t cur = position_.index;
   std::size_t next = cur + 1;
 
@@ -117,7 +140,7 @@ auto Lexer::TrySkipComment() -> std::expected<bool, tokens::ErrorToken> {
   return false;
 }
 
-auto Lexer::SkipCommentOneLiner() -> std::expected<bool, tokens::ErrorToken> {
+std::expected<bool, Token> Lexer::SkipCommentOneLiner() {
   NextPosition(2);
 
   while (!AtEof() && Getchr() != '\n') {
@@ -131,7 +154,7 @@ auto Lexer::SkipCommentOneLiner() -> std::expected<bool, tokens::ErrorToken> {
   return true;
 }
 
-auto Lexer::SkipCommentMultiLiner() -> std::expected<bool, tokens::ErrorToken> {
+std::expected<bool, Token> Lexer::SkipCommentMultiLiner() {
   NextPosition(2);
   size_t comment_depth = 1;
 
@@ -158,12 +181,12 @@ auto Lexer::SkipCommentMultiLiner() -> std::expected<bool, tokens::ErrorToken> {
     return true;
   }
 
-  auto error = CreateToken<tokens::ErrorToken>(start_position_, position_);
+  auto error = CreateToken(TokenType::kErrorToken, start_position_, position_);
   ecs::Set<ecs::ErrorMessage>(error, std::string("comment not closed"));
   return std::unexpected(error);
 }
 
-auto Lexer::GetString() -> TokenVariant {
+Token Lexer::GetString() {
   if (!reading_string_) {
     NextPositionOnce();
     reading_string_ = true;
@@ -191,21 +214,23 @@ auto Lexer::GetString() -> TokenVariant {
 
   if (!AtEof()) {  // we're at '"'
     NextPositionOnce();
-    auto result = CreateToken<tokens::String>(start_position_, position_);
+    auto result =
+        CreateToken(TokenType::kStringLiteral, start_position_, position_);
     ecs::Set<ecs::StrValue>(result, std::move(accumulated_string_));
     return result;
   }
 
-  auto error = CreateToken<tokens::ErrorToken>(start_position_, position_);
+  auto error = CreateToken(TokenType::kErrorToken, start_position_, position_);
   ecs::Set<ecs::ErrorMessage>(error, std::string("string not terminated"));
   return error;
 }
 
-auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
+std::expected<char, Token> Lexer::GetEscapeSequence() {
   NextPositionOnce();
 
   if (AtEof()) {
-    auto error = CreateToken<tokens::ErrorToken>(start_position_, position_);
+    auto error =
+        CreateToken(TokenType::kErrorToken, start_position_, position_);
     ecs::Set<ecs::ErrorMessage>(error, std::string("string not terminated"));
     return std::unexpected(error);
   }
@@ -238,7 +263,7 @@ auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
       return GetHexEscapeSequence();
 
     default: {
-      auto error = tokens::ErrorToken{};
+      auto error = Token(TokenType::kErrorToken);
       ecs::Set<ecs::TokenStop>(error, position_);
       ecs::Set<ecs::ErrorMessage>(error,
                                   std::string("unknown escape sequence"));
@@ -247,14 +272,15 @@ auto Lexer::GetEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
   }
 }
 
-auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
+std::expected<char, Token> Lexer::GetHexEscapeSequence() {
   std::size_t cur = position_.index;
   std::size_t next = cur + 1;
 
   NextPosition(2);
 
   if (next >= input_.size()) {
-    auto error = CreateToken<tokens::ErrorToken>(start_position_, position_);
+    auto error =
+        CreateToken(TokenType::kErrorToken, start_position_, position_);
     ecs::Set<ecs::ErrorMessage>(error, std::string("string not terminated"));
     return std::unexpected(error);
   }
@@ -267,7 +293,7 @@ auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
     return static_cast<char>(num);
   }
 
-  auto error = tokens::ErrorToken{};
+  auto error = Token(TokenType::kErrorToken);
   ecs::Set<ecs::TokenStop>(error, position_);
   ecs::Set<ecs::ErrorMessage>(error,
                               std::string("unknown hex escape sequence"));
@@ -277,7 +303,7 @@ auto Lexer::GetHexEscapeSequence() -> std::expected<char, tokens::ErrorToken> {
 /*
  * hate strtoxx functions, thery're evil
  */
-auto Lexer::GetNum() -> TokenVariant {
+Token Lexer::GetNum() {
   const char* start = input_.data() + position_.index;
   char* int_end = nullptr;
   char* float_end = nullptr;
@@ -288,17 +314,19 @@ auto Lexer::GetNum() -> TokenVariant {
   NextPosition(std::max(int_end - start, float_end - start));
 
   if (int_end == float_end) {
-    auto result = CreateToken<tokens::Int>(start_position_, position_);
+    auto result =
+        CreateToken(TokenType::kIntLiteral, start_position_, position_);
     ecs::Set<ecs::IntValue>(result, int_value);
     return result;
   }
 
-  auto result = CreateToken<tokens::Float>(start_position_, position_);
+  auto result =
+      CreateToken(TokenType::kFloatLiteral, start_position_, position_);
   ecs::Set<ecs::FloatValue>(result, float_value);
   return result;
 }
 
-auto Lexer::GetIdOrKeyword() -> TokenVariant {
+Token Lexer::GetIdOrKeyword() {
   auto chr = Getchr();
   std::string accum_id(1, chr);
   auto* node = keywords_.NextNode(chr);
@@ -315,15 +343,15 @@ auto Lexer::GetIdOrKeyword() -> TokenVariant {
   }
 
   if (node != nullptr && node->HasValue()) {
-    return node->Value()(start_position_, position_);
+    return CreateToken(node->Value(), start_position_, position_);
   }
 
-  auto result = CreateToken<tokens::IdToken>(start_position_, position_);
+  auto result = CreateToken(TokenType::kIdToken, start_position_, position_);
   ecs::Set<ecs::IdName>(result, std::move(accum_id));
   return result;
 }
 
-auto Lexer::GetOther() -> TokenVariant {
+Token Lexer::GetOther() {
   char chr = Getchr();
   auto* node = other_tokens_.NextNode(chr);
   auto* last_node = node;
@@ -348,10 +376,10 @@ auto Lexer::GetOther() -> TokenVariant {
   }
 
   if (node != nullptr && node->HasValue()) {
-    return node->Value()(start_position_, position_);
+    return CreateToken(node->Value(), start_position_, position_);
   }
 
-  auto error = CreateToken<tokens::ErrorToken>(start_position_, position_);
+  auto error = CreateToken(TokenType::kErrorToken, start_position_, position_);
   ecs::Set<ecs::ErrorMessage>(error, std::string("unexpected symbol"));
   return error;
 }
@@ -378,10 +406,10 @@ void Lexer::NextPosition(std::size_t n) {
   }
 }
 
-auto Lexer::AtEof() -> bool { return position_.index == input_.size(); }
-auto Lexer::Getchr() -> char { return input_[position_.index]; }
+bool Lexer::AtEof() { return position_.index == input_.size(); }
+char Lexer::Getchr() { return input_[position_.index]; }
 
-auto Lexer::SkipWs() -> bool {
+bool Lexer::SkipWs() {
   bool res = false;
 
   while (!AtEof() && std::isspace(Getchr()) != 0) {
@@ -392,40 +420,4 @@ auto Lexer::SkipWs() -> bool {
   return res;
 }
 
-void Lexer::BuildKeywords() {
-#define KEYWORD(name)                                                 \
-  {                                                                   \
-    using KwType = tokens::Keyword_##name;                            \
-    keywords_.Insert(std::string(#name), CreateTokenVariant<KwType>); \
-  }
-
-#include <language_data/keywords.dat>
-
-#undef KEYWORD
-}
-
-void Lexer::BuildOtherTokens() {
-#define EXPAND(name, type, str)                                          \
-  {                                                                      \
-    using KwType = tokens::type##name;                                   \
-    other_tokens_.Insert(std::string(str), &CreateTokenVariant<KwType>); \
-  }
-
-#define UN_OP(name, str) EXPAND(name, Un, str)
-#define BIN_OP(name, str) EXPAND(name, Bin, str)
-#define SYNT_TOKEN(name, str) EXPAND(name, Syntax, str)
-
-  // clang-format off: order is important: need binary > unary
-#include <language_data/un_ops.dat>
-#include <language_data/bin_ops.dat>
-#include <language_data/synt_tokens.dat>
-  // clang-format on
-
-#undef EXPAND
-
-#undef UN_OP
-#undef BIN_OP
-#undef SYNT_TOKEN
-}
-
-}  // namespace lexer
+}  // namespace lexerv2

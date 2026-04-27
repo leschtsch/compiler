@@ -15,7 +15,8 @@ Checks: >
   -readability-named-parameter,
   -google-readability-todo,
   -portability-avoid-pragma-once,
-  -llvm-prefer-static-over-anonymous-namespace
+  -llvm-prefer-static-over-anonymous-namespace,
+  -modernize-use-trailing-return-type,
 
 # llvm-namespace-comment is checked via clang-format
 
