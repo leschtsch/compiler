@@ -1,30 +1,51 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.22)
 
-PROJECT(formal_languages)
+IF(CMAKE_BUILD_TYPE STREQUAL "CodeCoverage")
+  SET(CMAKE_CXX_COMPILER g++)
+ELSEIF(CMAKE_BUILD_TYPE STREQUAL "ClangBuildAnalyze")
+  SET(CMAKE_CXX_COMPILER clang++)
+ENDIF()
+
+PROJECT(compiler)
 
 SET(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-SET(CMAKE_CXX_COMPILER g++)
 SET(CMAKE_CXX_STANDARD 23)
-
-IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  SET(CMAKE_CXX_FLAGS "-g -O0 -fsanitize=address -Wall -Wextra -Werror")
-ELSEIF(CMAKE_BUILD_TYPE STREQUAL "CodeCoverage")
-  SET(CMAKE_CXX_FLAGS "-g -O0 --coverage -Wall -Wextra -Werror")
-ELSEIF(CMAKE_BUILD_TYPE STREQUAL "Release")
-  SET(CMAKE_CXX_FLAGS "-O2 -DNDEBUG -Wall -Wextra -Werror")
-ELSE()
-  MESSAGE(NOTICE "unknown build type defaulted to Release")
-  SET(CMAKE_CXX_FLAGS "-O2 -DNDEBUG -Wall -Wextra -Werror")
-ENDIF()
 
 SET(
   CMAKE_RUNTIME_OUTPUT_DIRECTORY
   ${CMAKE_SOURCE_DIR}/bin/${CMAKE_BUILD_TYPE}
 )
 
-INCLUDE_DIRECTORIES(src)
+ADD_LIBRARY(project_options INTERFACE)
+
+IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE -Wall -Wextra -Werror)
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS} -g -O0 -fsanitize=address)
+  TARGET_LINK_OPTIONS(project_options INTERFACE -fsanitize=address)
+ELSEIF(CMAKE_BUILD_TYPE STREQUAL "CodeCoverage")
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE -Wall -Wextra -Werror)
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS} -g -O0 --coverage)
+  TARGET_LINK_OPTIONS(project_options INTERFACE --coverage)
+ELSEIF(CMAKE_BUILD_TYPE STREQUAL "Release")
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE -Wall -Wextra -Werror)
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS} -O2 -DNDEBUG -flto)
+  TARGET_LINK_OPTIONS(project_options INTERFACE -flto)
+ELSEIF(CMAKE_BUILD_TYPE STREQUAL "ClangBuildAnalyze")
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE -Wall -Wextra -Werror)
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS} -O2 -ftime-trace)
+ELSEIF(CMAKE_BUILD_TYPE STREQUAL "Perf")
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE -Wall -Wextra -Werror)
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS} -O0 -g)
+ELSE()
+  MESSAGE(NOTICE "unknown build type defaulted to build with no flags")
+ENDIF()
+
+TARGET_INCLUDE_DIRECTORIES(project_options INTERFACE src)
+
+ADD_SUBDIRECTORY(src)
 
 IF (ENABLE_TESTS)
   ENABLE_TESTING()
-
+  ADD_SUBDIRECTORY(tests)
 ENDIF()
+

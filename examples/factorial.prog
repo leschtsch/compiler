@@ -1,0 +1,13 @@
+uint Factorial(uint x){
+  if x <= 1 {
+    return 1;
+  }
+
+  return x * Factorial(x - 1);
+}
+
+int main(){
+  print_uint(Factorial(5));
+
+  return 0;
+}
