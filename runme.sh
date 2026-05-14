@@ -4,7 +4,7 @@ rm -rf build bin docs coverage
 
 echo -e "\033[1mbuilding: \033[0m"
 
-BUILD_TYPES="Debug CodeCoverage"
+BUILD_TYPES="Debug CodeCoverage Release"
 
 for build_type in ${BUILD_TYPES}; do
 	mkdir -p build/${build_type}

@@ -20,7 +20,7 @@ IfStatement ::= "if", Expression, BlockStatement, [ ElseStatement ].
 WhileStatement ::= "while", Expression, BlockStatement.
 ReturnStatement ::= "return", [ Expression ], ";".
 !AssingmentOrCall ::= Locator, ( CallSuffix | AssignmentSuffix ), ";".
-!CallSuffix ::= "(", [ Expression, {",", Expression} ] ")".
+CallSuffix ::= "(", [ Expression, {",", Expression} ] ")".
 !AssignmentSuffix ::= "=", Expression.
 
 Locator ::= ?ID?
