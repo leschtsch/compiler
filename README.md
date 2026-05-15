@@ -14,6 +14,9 @@ Or you may build it manually using cmake. You probably want
     make -j4
 ```
 
+Then you can run program with `./bin/main < program`.
+Currently it produces ast and symtab dump in graphviz-dot format to stdout.
+
 To run tests:
 ```bash
     mkdir build
@@ -26,3 +29,5 @@ To run tests:
 Other build types include `Debug`, `CodeCoverage`, `ClangBuildAnalyze` and `Perf`.
 Any other build type (or no build type) will result in 
 build with user defined `CMAKE_CXX_FLAGS` only.
+
+
