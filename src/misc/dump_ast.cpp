@@ -2,32 +2,31 @@
 
 #include <ecs/ecs.hpp>
 #include <ecs/used_components.hpp>
+#include <parser/ast.hpp>
 
 #include <cstdint>
 #include <ostream>
 #include <string>
 #include <variant>
 
-#include "ast.hpp"
-
-namespace parser {
+namespace misc {
 
 namespace {
 
 //===========================V=HELPERS=V============================================================
-void DumpNodeOpen(std::ostream& ostream, const nodes::BaseNode* node) {
+void DumpNodeOpen(std::ostream& ostream, const parser::nodes::BaseNode* node) {
   ostream << reinterpret_cast<std::uintptr_t>(node) << "[ ";
 }
 
 void DumpNodeLabel(std::ostream& ostream, auto* node) {
-  ostream << "label = \"" << nodes::GetName(node) << "\" ";
+  ostream << "label = \"" << parser::nodes::GetName(node) << "\" ";
 }
 
 void DumpNodeLabel(std::ostream& ostream, const std::string& label) {
   ostream << "label = \"" << label << "\" ";
 }
 
-void DumpNodeColor(std::ostream& ostream, const nodes::BaseNode* node) {
+void DumpNodeColor(std::ostream& ostream, const parser::nodes::BaseNode* node) {
   if (!node->Healthy()) {
     ostream << "style=filled fillcolor=lightpink ";
   }
@@ -39,7 +38,7 @@ void DumpNodeColor(std::ostream& ostream, const std::string& color) {
 
 void DumpNodeClose(std::ostream& ostream) { ostream << "];\n"; }
 
-[[nodiscard]]  void* GetAddr(const nodes::NodesVariant& node) {
+[[nodiscard]] void* GetAddr(const parser::nodes::NodesVariant& node) {
   return std::visit([](auto& ptr) -> void* { return ptr.get(); }, node);
 }
 //===========================^=HELPERS=^============================================================
@@ -50,41 +49,44 @@ void DumpNodeBody(std::ostream& ostream, const auto* node) {
   DumpNodeColor(ostream, node);
 }
 
-void DumpNodeBody(std::ostream& ostream, const nodes::IdNode* node) {
-  DumpNodeLabel(
-      ostream,
-      nodes::GetName(node) + "\\n" + ecs::Get<ecs::IdName>(*node).Value());
+void DumpNodeBody(std::ostream& ostream, const parser::nodes::IdNode* node) {
+  DumpNodeLabel(ostream,
+                parser::nodes::GetName(node) + "\\n" +
+                    ecs::Get<ecs::IdName>(*node).Value());
 
   DumpNodeColor(ostream, node);
 }
 
-void DumpNodeBody(std::ostream& ostream, const nodes::ErrorNode* node) {
+void DumpNodeBody(std::ostream& ostream, const parser::nodes::ErrorNode* node) {
   // TODO: escape sequences
 
   DumpNodeLabel(ostream, ecs::Get<ecs::ErrorMessage>(*node).Value());
   DumpNodeColor(ostream, "darkred");
 }
 
-void DumpNodeBody(std::ostream& ostream, const nodes::IntLiteral* node) {
+void DumpNodeBody(std::ostream& ostream,
+                  const parser::nodes::IntLiteral* node) {
 
   DumpNodeLabel(ostream,
-                nodes::GetName(node) + "\\n" +
+                parser::nodes::GetName(node) + "\\n" +
                     std::to_string(ecs::Get<ecs::IntValue>(*node).Value()));
 }
 
-void DumpNodeBody(std::ostream& ostream, const nodes::FloatLiteral* node) {
+void DumpNodeBody(std::ostream& ostream,
+                  const parser::nodes::FloatLiteral* node) {
 
   DumpNodeLabel(ostream,
-                nodes::GetName(node) + "\\n" +
+                parser::nodes::GetName(node) + "\\n" +
                     std::to_string(ecs::Get<ecs::FloatValue>(*node).Value()));
 }
 
-void DumpNodeBody(std::ostream& ostream, const nodes::StrLiteral* node) {
+void DumpNodeBody(std::ostream& ostream,
+                  const parser::nodes::StrLiteral* node) {
 
   // TODO: escape sequences
-  DumpNodeLabel(
-      ostream,
-      nodes::GetName(node) + "\\n" + ecs::Get<ecs::StrValue>(*node).Value());
+  DumpNodeLabel(ostream,
+                parser::nodes::GetName(node) + "\\n" +
+                    ecs::Get<ecs::StrValue>(*node).Value());
 }
 //===========================^=DUMP=OVERLOADS=V=====================================================
 
@@ -123,11 +125,11 @@ class Visitor {
 
 }  // namespace
 
-void DumpAst(std::ostream& ostream, const nodes::NodesVariant& node) {
+void DumpAst(std::ostream& ostream, const parser::nodes::NodesVariant& node) {
   Visitor visitor(ostream);
   ostream << "digraph tree {\n";
   std::visit(visitor, node);
   ostream << "}\n";
 }
 
-}  // namespace parser
+}  // namespace misc

@@ -255,7 +255,7 @@ nodes::NodesVariant Parser::ParseName() {
 
   // clang-format off
   auto child = TokenToNode<
-    TokenCase<lexer::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
+    TokenCase<lexer::TokenType::kIdToken, nodes::IdNode, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
   >(cur_token_, "expected id");
   // clang-format on
 
@@ -480,7 +480,7 @@ nodes::NodesVariant Parser::ParseLocator() {
 
   // clang-format off
   auto child = TokenToNode<
-    TokenCase<lexer::TokenType::kIdToken, nodes::Name, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
+    TokenCase<lexer::TokenType::kIdToken, nodes::IdNode, ecs::TokenStart, ecs::TokenStop, ecs::IdName>
   >(cur_token_, "expected id");
   // clang-format on
 
