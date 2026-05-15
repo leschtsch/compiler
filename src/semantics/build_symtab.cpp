@@ -18,6 +18,11 @@
 #include "symbols.hpp"
 #include "types.hpp"
 
+// TODO: transpose symtab
+// TODO: remove indexes from children
+// TODO: ast nodes remake
+// TODO: move Visitor definitions out of class
+
 namespace semantics {
 
 namespace {
@@ -202,7 +207,7 @@ class SymtabVisitor {
     }
 
     symtab_.EnterScope();
-    BlockStmtNoScope(block);
+    BlockStmt(block);
     symtab_.ExitScope();
   }
 
@@ -219,7 +224,7 @@ class SymtabVisitor {
         std::get<std::unique_ptr<parser::nodes::Name>>(def->Children()[1]);
     std::string name = Name2Str(name_node);
 
-    auto symbol = std::make_unique<VariableSymbol>(type);
+    auto symbol = std::make_unique<VariableSymbol>(type, name);
     if (!symtab_.RegisterSymbol(name, symbol.get())) {
       std::cout << "duplicate symbol " << name << "\n";
       has_error_ = true;
@@ -256,7 +261,7 @@ class SymtabVisitor {
     auto args = GetFunctionArgs(func);
 
     auto symbol =
-        std::make_unique<FunctionSymbol>(return_type, std::move(args));
+        std::make_unique<FunctionSymbol>(return_type, name, std::move(args));
     if (!symtab_.RegisterSymbol(name, symbol.get())) {
       std::cout << "duplicate symbol " << name << "\n";
       has_error_ = true;
@@ -321,7 +326,7 @@ class SymtabVisitor {
 
     auto& body = std::get<std::unique_ptr<parser::nodes::BlockStatement>>(
         func->Children()[3]);
-    BlockStmtNoScope(body);
+    BlockStmt(body);
 
     symtab_.ExitScope();
   }
@@ -337,7 +342,7 @@ class SymtabVisitor {
         std::get<std::unique_ptr<parser::nodes::Name>>(decl->Children()[1]);
     std::string name = Name2Str(name_node);
 
-    auto symbol = std::make_unique<VariableSymbol>(type);
+    auto symbol = std::make_unique<VariableSymbol>(type, name);
     if (!symtab_.RegisterSymbol(name, symbol.get())) {
       // TODO better errors
       std::cout << "duplicate symbol " << name << "\n";
@@ -346,12 +351,15 @@ class SymtabVisitor {
     ecs::Set<ecs::VariableDef>(*decl, std::move(symbol));
   }
 
-  void BlockStmtNoScope(std::unique_ptr<parser::nodes::BlockStatement>& block) {
+  void BlockStmt(std::unique_ptr<parser::nodes::BlockStatement>& block) {
     assert(block != nullptr);
+    symtab_.EnterScope();
 
     for (auto& child : block->ChildrenSpan()) {
       std::visit(*this, child);
     }
+
+    symtab_.ExitScope();
   }
 
   SymtabHelper symtab_;

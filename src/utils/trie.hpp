@@ -95,6 +95,7 @@ class Trie {
         continue;
       }
 
+      //TODO: remove format
       ostream << std::format("{} -> {} [label=\"{}\"];\n",
                              reinterpret_cast<std::uintptr_t>(node),
                              reinterpret_cast<std::uintptr_t>(&child),

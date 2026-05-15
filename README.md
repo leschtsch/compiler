@@ -13,3 +13,16 @@ Or you may build it manually using cmake. You probably want
     cmake .. -DCMAKE_BUILD_TYPE="Release"
     make -j4
 ```
+
+To run tests:
+```bash
+    mkdir build
+    cd build
+    cmake .. -DCMAKE_BUILD_TYPE="Release" -DENABLE_TESTS=YES
+    make -j4
+    ctest .
+```
+
+Other build types include `Debug`, `CodeCoverage`, `ClangBuildAnalyze` and `Perf`.
+Any other build type (or no build type) will result in 
+build with user defined `CMAKE_CXX_FLAGS` only.
