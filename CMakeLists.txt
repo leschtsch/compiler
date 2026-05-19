@@ -38,6 +38,7 @@ ELSEIF(CMAKE_BUILD_TYPE STREQUAL "Perf")
   TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS} -O0 -g)
 ELSE()
   MESSAGE(NOTICE "unknown build type defaulted to build with no flags")
+  TARGET_COMPILE_OPTIONS(project_options INTERFACE ${CMAKE_CXX_FLAGS})
 ENDIF()
 
 TARGET_INCLUDE_DIRECTORIES(project_options INTERFACE src)

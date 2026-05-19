@@ -1,5 +1,6 @@
-#include <parser/dump_ast.hpp>
+#include <misc/dump_ast.hpp>
 #include <parser/parser.hpp>
+#include <semantics/build_symtab.hpp>
 
 #include <iostream>
 #include <string>
@@ -25,5 +26,6 @@ auto main() -> int {
   } while (vec_input.back().GetType() != lexer::TokenType::kEofToken);
 
   auto ast = parser::Parse(vec_input);
-  parser::DumpAst(std::cout, ast);
+  semantics::BuildSymtab(ast);
+  misc::DumpAst(std::cout, ast);
 }

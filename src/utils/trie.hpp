@@ -5,7 +5,6 @@
  */
 
 #include <cstdint>
-#include <format>
 #include <optional>
 #include <ostream>
 #include <unordered_map>
@@ -95,10 +94,10 @@ class Trie {
         continue;
       }
 
-      ostream << std::format("{} -> {} [label=\"{}\"];\n",
-                             reinterpret_cast<std::uintptr_t>(node),
-                             reinterpret_cast<std::uintptr_t>(&child),
-                             chr);
+      ostream << reinterpret_cast<std::uintptr_t>(node) << " -> "
+              << reinterpret_cast<std::uintptr_t>(&child) << " [label=\"" << chr
+              << "\"];\n";
+
       DumpImpl(ostream, &child);
     }
   }

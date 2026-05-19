@@ -22,16 +22,17 @@ class NaryNode;
 class ArbitraryNode;
 
 // NOLINTNEXTLINE
-#define NODE(Node, Parent) class Node;
+#define NODE(Node, ...) class Node;
 
 #include <language_data/grammar_nodes.dat>
 
 #undef NODE
 
-#define NODE(Node, Parent) std::unique_ptr<Node>,
 //===========================^=FORwARDS=^===========================================================
 
 //===========================V=VARIANT=V============================================================
+
+#define NODE(Node, ...) std::unique_ptr<Node>,
 using NodesVariant = std::variant<
 
 #include <language_data/grammar_nodes.dat>
@@ -87,7 +88,9 @@ class BaseNode : public ecs::Entity {
   // NOLINTBEGIN(readability-convert-member-functions-to-static): unified
   // interface with descendants
   [[nodiscard]] std::span<NodesVariant> ChildrenSpan() { return {}; }
-  [[nodiscard]] std::span<const NodesVariant> ChildrenSpan() const { return {}; }
+  [[nodiscard]] std::span<const NodesVariant> ChildrenSpan() const {
+    return {};
+  }
   // NOLINTEND(readability-convert-member-functions-to-static)
 
   bool& Healthy() { return healthy_; }
@@ -118,9 +121,7 @@ class NaryNode : public BaseNode {
 
 class ArbitraryNode : public BaseNode {
  public:
-  [[nodiscard]] std::span<NodesVariant> ChildrenSpan() {
-    return children_;
-  }
+  [[nodiscard]] std::span<NodesVariant> ChildrenSpan() { return children_; }
   [[nodiscard]] std::span<const NodesVariant> ChildrenSpan() const {
     return children_;
   }
@@ -134,14 +135,43 @@ class ArbitraryNode : public BaseNode {
   std::vector<NodesVariant> children_;
 };
 
-// NOLINTBEGIN
-#define NODE(Node, Parent) \
-  class Node : public Parent {};
-// NOLINTEND
+#define GET_4(x0, x1, x2, x3, x, ...) x
+
+#define DISPATCH(...)                        \
+  GET_4(__VA_ARGS__ __VA_OPT__(, ) EXPAND_4, \
+        EXPAND_3,                            \
+        EXPAND_2,                            \
+        EXPAND_1,                            \
+        EXPAND_0)
+
+#define EXPAND_4(ind, x, ...) EXPAND_1(ind, x) EXPAND_3((ind) + 1, __VA_ARGS__)
+#define EXPAND_3(ind, x, ...) EXPAND_1(ind, x) EXPAND_2((ind) + 1, __VA_ARGS__)
+#define EXPAND_2(ind, x, ...) EXPAND_1(ind, x) EXPAND_1((ind) + 1, __VA_ARGS__)
+
+#define EXPAND_1(ind, name)                        \
+  NodesVariant& name() { return Children()[ind]; } \
+  const NodesVariant& name() const { return Children()[ind]; }
+
+#define EXPAND_0(ind, name)
+#define EXPAND(...) DISPATCH(__VA_ARGS__)(0, __VA_ARGS__)
+
+#define NODE(Node, Parent, ...) \
+  class Node : public Parent {  \
+   public:                      \
+    EXPAND(__VA_ARGS__)         \
+  };
 
 #include <language_data/grammar_nodes.dat>
 
 #undef NODE
+#undef EXPAND
+#undef EXPAND_1
+#undef EXPAND_2
+#undef EXPAND_3
+#undef EXPAND_4
+#undef DISPATCH
+#undef GET_4
+
 //===========================^=DEFINITIONS=^========================================================
 
 //===========================V=NAMES=V==============================================================
@@ -160,7 +190,7 @@ template <std::size_t n_children>
   return "ArbitraryNode";
 }
 
-#define NODE(Node, Parent)                                           \
+#define NODE(Node, ...)                                              \
   [[nodiscard]] inline std::string GetName(const Node* /* node */) { \
     return #Node;                                                    \
   }
