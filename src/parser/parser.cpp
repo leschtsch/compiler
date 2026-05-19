@@ -41,19 +41,18 @@ bool StoreCheckErr(nodes::NodesVariant& store, nodes::NodesVariant&& child) {
   return is_healthy;
 }
 
+template <typename Parent>
 bool StoreChild(nodes::NodesVariant& parent,
                 nodes::NodesVariant&& child,
-                std::size_t idx) {
+                nodes::NodesVariant& (Parent::*child_getter)()) {
   bool success = IsHealthy(child);
 
   auto visitor = utils::Overloaded{
-      [](nodes::BaseNode*) -> void {
-        throw std::runtime_error("setting child of empty node");
+      [&child, &child_getter](Parent* parent) -> void {
+        (parent->*child_getter)() = std::move(child);
       },
-      [&child, idx]<std::size_t n_children>(nodes::NaryNode<n_children>* ptr)
-          -> void { ptr->Children()[idx] = std::move(child); },
-      [&child, idx](nodes::ArbitraryNode* ptr) -> void {
-        ptr->Children()[idx] = std::move(child);
+      [](nodes::BaseNode* /*ptr*/) -> void {
+        throw std::runtime_error("setting child of bad parent");
       }};
 
   nodes::VisitPtr(visitor, parent);
@@ -219,11 +218,10 @@ nodes::NodesVariant Parser::Parse() {
 nodes::NodesVariant Parser::ParseFunctionDefinition() {
   auto result = std::make_unique<nodes::FunctionDefinition>();
 
-  bool success =
-      StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
-      StoreCheckErr(result->Children()[1], ParseName()) and
-      StoreCheckErr(result->Children()[2], ParseParameterList()) and
-      StoreCheckErr(result->Children()[3], ParseBlockStatement());
+  bool success = StoreCheckErr(result->ReturnType(), ParseTypeDeclaration()) and
+                 StoreCheckErr(result->Name(), ParseName()) and
+                 StoreCheckErr(result->Params(), ParseParameterList()) and
+                 StoreCheckErr(result->Body(), ParseBlockStatement());
 
   result->Healthy() &= success;
 
@@ -242,7 +240,7 @@ nodes::NodesVariant Parser::ParseTypeDeclaration() {
   >(cur_token_, "expected type");
   // clang-format on
 
-  bool success = StoreCheckErr(result->Children()[0], std::move(child));
+  bool success = StoreCheckErr(result->Type(), std::move(child));
   result->Healthy() &= success;
 
   NextToken();
@@ -259,7 +257,7 @@ nodes::NodesVariant Parser::ParseName() {
   >(cur_token_, "expected id");
   // clang-format on
 
-  bool success = StoreCheckErr(result->Children()[0], std::move(child));
+  bool success = StoreCheckErr(result->Id(), std::move(child));
   result->Healthy() &= success;
 
   NextToken();
@@ -295,9 +293,8 @@ nodes::NodesVariant Parser::ParseParameterList() {
 nodes::NodesVariant Parser::ParseParameterDecl() {
   auto result = std::make_unique<nodes::ParameterDecl>();
 
-  bool success =
-      StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
-      StoreCheckErr(result->Children()[1], ParseName());
+  bool success = StoreCheckErr(result->Type(), ParseTypeDeclaration()) and
+                 StoreCheckErr(result->Name(), ParseName());
 
   result->Healthy() &= success;
 
@@ -382,12 +379,11 @@ nodes::NodesVariant Parser::ParseStatement() {
 nodes::NodesVariant Parser::ParseVariableDefinition() {
   auto result = std::make_unique<nodes::VariableDefinition>();
 
-  bool success =
-      StoreCheckErr(result->Children()[0], ParseTypeDeclaration()) and
-      StoreCheckErr(result->Children()[1], ParseName()) and
-      Consume<lexer::TokenType::kBinAssign>() and
-      StoreCheckErr(result->Children()[2], ParseExpression()) and
-      Consume<lexer::TokenType::kSyntSemicolon>();
+  bool success = StoreCheckErr(result->Type(), ParseTypeDeclaration()) and
+                 StoreCheckErr(result->Name(), ParseName()) and
+                 Consume<lexer::TokenType::kBinAssign>() and
+                 StoreCheckErr(result->Value(), ParseExpression()) and
+                 Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
   return result;
@@ -397,16 +393,16 @@ nodes::NodesVariant Parser::ParseIfStatement() {
   auto result = std::make_unique<nodes::IfStatement>();
 
   bool success = Consume<lexer::TokenType::kKwif>() and
-                 StoreCheckErr(result->Children()[0], ParseExpression()) and
-                 StoreCheckErr(result->Children()[1], ParseBlockStatement());
+                 StoreCheckErr(result->Cond(), ParseExpression()) and
+                 StoreCheckErr(result->Then(), ParseBlockStatement());
 
   if (Lookup<lexer::TokenType::kKwelse>()) {
     success &= Consume<lexer::TokenType::kKwelse>();
 
     if (Lookup<lexer::TokenType::kKwif>()) {
-      success &= StoreCheckErr(result->Children()[2], ParseIfStatement());
+      success &= StoreCheckErr(result->Else(), ParseIfStatement());
     } else {
-      success &= StoreCheckErr(result->Children()[2], ParseBlockStatement());
+      success &= StoreCheckErr(result->Else(), ParseBlockStatement());
     }
   }
 
@@ -418,8 +414,8 @@ nodes::NodesVariant Parser::ParseWhileStatement() {
   auto result = std::make_unique<nodes::WhileStatement>();
 
   bool success = Consume<lexer::TokenType::kKwwhile>() and
-                 StoreCheckErr(result->Children()[0], ParseExpression()) and
-                 StoreCheckErr(result->Children()[1], ParseBlockStatement());
+                 StoreCheckErr(result->Cond(), ParseExpression()) and
+                 StoreCheckErr(result->Body(), ParseBlockStatement());
 
   result->Healthy() &= success;
   return result;
@@ -431,7 +427,7 @@ nodes::NodesVariant Parser::ParseReturnStatement() {
   bool success = Consume<lexer::TokenType::kKwreturn>();
 
   if (!Lookup<lexer::TokenType::kSyntSemicolon>()) {
-    success &= StoreCheckErr(result->Children()[0], ParseExpression());
+    success &= StoreCheckErr(result->Value(), ParseExpression());
   }
 
   success &= Consume<lexer::TokenType::kSyntSemicolon>();
@@ -454,9 +450,9 @@ auto Parser::ParseAssignment(nodes::NodesVariant&& locator)
     -> nodes::NodesVariant {
   auto result = std::make_unique<nodes::Assignment>();
 
-  bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
+  bool success = StoreCheckErr(result->Dest(), std::move(locator)) and
                  Consume<lexer::TokenType::kBinAssign>() and
-                 StoreCheckErr(result->Children()[1], ParseExpression()) and
+                 StoreCheckErr(result->Src(), ParseExpression()) and
                  Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
@@ -467,8 +463,8 @@ auto Parser::ParseCallStatement(nodes::NodesVariant&& locator)
     -> nodes::NodesVariant {
   auto result = std::make_unique<nodes::CallStatement>();
 
-  bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
-                 StoreCheckErr(result->Children()[1], ParseCallSuffix()) and
+  bool success = StoreCheckErr(result->Func(), std::move(locator)) and
+                 StoreCheckErr(result->Args(), ParseCallSuffix()) and
                  Consume<lexer::TokenType::kSyntSemicolon>();
 
   result->Healthy() &= success;
@@ -484,7 +480,7 @@ nodes::NodesVariant Parser::ParseLocator() {
   >(cur_token_, "expected id");
   // clang-format on
 
-  bool success = StoreCheckErr(result->Children()[0], std::move(child));
+  bool success = StoreCheckErr(result->Id(), std::move(child));
 
   result->Healthy() &= success;
 
@@ -509,11 +505,11 @@ nodes::NodesVariant Parser::ParseLogExpr() {
   while (success && Lookup<lexer::TokenType::kBinLogicalAnd,
                            lexer::TokenType::kBinLogicalOr>()) {
     auto tmp = node_creator(cur_token_, "expected && or ||");
-    StoreChild(tmp, std::move(last_node), 0);
+    StoreChild(tmp, std::move(last_node), &nodes::BinOp::Lhs);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild(last_node, ParseComparExpr(), 1);
+    success &= StoreChild(last_node, ParseComparExpr(), &nodes::BinOp::Rhs);
   }
 
   SetHealthy(last_node, success);
@@ -542,11 +538,11 @@ nodes::NodesVariant Parser::ParseComparExpr() {
                            lexer::TokenType::kBinGt,
                            lexer::TokenType::kBinGeq>()) {
     auto tmp = node_creator(cur_token_, "expected comparison operator");
-    StoreChild(tmp, std::move(last_node), 0);
+    StoreChild(tmp, std::move(last_node), &nodes::BinOp::Lhs);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild(last_node, ParseAddExpr(), 1);
+    success &= StoreChild(last_node, ParseComparExpr(), &nodes::BinOp::Rhs);
   }
 
   SetHealthy(last_node, success);
@@ -564,15 +560,14 @@ nodes::NodesVariant Parser::ParseAddExpr() {
   auto last_node = ParseMulExpr();
   bool success = IsHealthy(last_node);
 
-  while (
-      success &&
-      Lookup<lexer::TokenType::kBinPlus, lexer::TokenType::kBinMinus>()) {
+  while (success &&
+         Lookup<lexer::TokenType::kBinPlus, lexer::TokenType::kBinMinus>()) {
     auto tmp = node_creator(cur_token_, "expected + or -");
-    StoreChild(tmp, std::move(last_node), 0);
+    StoreChild(tmp, std::move(last_node), &nodes::BinOp::Lhs);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild(last_node, ParseMulExpr(), 1);
+    success &= StoreChild(last_node, ParseComparExpr(), &nodes::BinOp::Rhs);
   }
 
   SetHealthy(last_node, success);
@@ -595,11 +590,11 @@ nodes::NodesVariant Parser::ParseMulExpr() {
                            lexer::TokenType::kBinDiv,
                            lexer::TokenType::kBinMod>()) {
     auto tmp = node_creator(cur_token_, "expected *, / or %");
-    StoreChild(tmp, std::move(last_node), 0);
+    StoreChild(tmp, std::move(last_node), &nodes::BinOp::Lhs);
     last_node = std::move(tmp);
     NextToken();
 
-    success &= StoreChild(last_node, ParseUnaryExpr(), 1);
+    success &= StoreChild(last_node, ParseComparExpr(), &nodes::BinOp::Rhs);
   }
 
   SetHealthy(last_node, success);
@@ -618,7 +613,7 @@ nodes::NodesVariant Parser::ParseLogNotExpr() {
   auto result = std::make_unique<nodes::LogNotExpr>();
 
   bool success = Consume<lexer::TokenType::kUnLogicalNot>() and
-                 StoreCheckErr(result->Children()[0], ParsePrimaryExpr());
+                 StoreCheckErr(result->Expr(), ParsePrimaryExpr());
 
   result->Healthy() &= success;
   return result;
@@ -664,8 +659,8 @@ nodes::NodesVariant Parser::ParseLocatorOrCall() {
 
   auto result = std::make_unique<nodes::CallExpression>();
 
-  bool success = StoreCheckErr(result->Children()[0], std::move(locator)) and
-                 StoreCheckErr(result->Children()[1], ParseCallSuffix());
+  bool success = StoreCheckErr(result->Func(), std::move(locator)) and
+                 StoreCheckErr(result->Args(), ParseCallSuffix());
 
   result->Healthy() &= success;
   return result;

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -18,74 +19,39 @@
 #include "symbols.hpp"
 #include "types.hpp"
 
-// TODO: transpose symtab
-// TODO: remove indexes from children
-// TODO: ast nodes remake
-// TODO: move Visitor definitions out of class
-
 namespace semantics {
 
 namespace {
-
-struct SymbolDef {
-  BaseSymbol* symbol;
-  std::uint64_t scope;
-};
 
 class SymtabHelper {
  private:
   using ScopeStack = std::vector<std::uint64_t>;
 
  public:
-  void EnterScope() { scope_stack_.push_back(++current_scope_); }
+  void EnterScope() { scopes_.emplace_back(); }
 
-  void ExitScope() {
-    std::size_t cur_scope = scope_stack_.back();
-    scope_stack_.pop_back();
+  void ExitScope() { scopes_.pop_back(); }
 
-    for (auto& [name, defs] : symbols_) {
-      if (defs.empty()) {
-        continue;
-      }
-
-      auto& last_def = defs.back();
-      if (last_def.scope == cur_scope) {
-        defs.pop_back();
+  BaseSymbol* Lookup(const std::string& name) {
+    for (auto& symbol : std::ranges::reverse_view(scopes_)) {
+      auto found = symbol.find(name);
+      if (found != symbol.end()) {
+        return found->second;
       }
     }
-  }
 
-  SymbolDef Lookup(const std::string& name) {
-    auto found = symbols_.find(name);
-    if (found == symbols_.end()) {
-      return SymbolDef{.symbol = nullptr, .scope = 0};
-    }
-
-    auto& defs = found->second;
-    if (defs.empty()) {
-      return SymbolDef{.symbol = nullptr, .scope = 0};
-    }
-
-    return defs.back();
+    return nullptr;
   }
 
   [[nodiscard]] bool RegisterSymbol(const std::string& name,
                                     BaseSymbol* symbol) {
-    auto& defs = symbols_[name];
-
-    if (!defs.empty() && defs.back().scope == current_scope_) {
-      return false;
-    }
-
-    defs.push_back(SymbolDef{.symbol = symbol, .scope = scope_stack_.back()});
-
-    return true;
+    auto& last_scope = scopes_.back();
+    auto [iter, res] = last_scope.try_emplace(name, symbol);
+    return res;
   }
 
  private:
-  std::uint64_t current_scope_{0};
-  ScopeStack scope_stack_;
-  std::unordered_map<std::string, std::vector<SymbolDef>> symbols_;
+  std::vector<std::unordered_map<std::string, BaseSymbol*>> scopes_;
 };
 
 class BaseTypeGetter {
@@ -120,7 +86,7 @@ class BaseTypeGetter {
  */
 TypeInfo TypeDecl2TypeInfo(
     const std::unique_ptr<parser::nodes::TypeDeclaration>& type_decl) {
-  const auto& type_node = type_decl->Children()[0];
+  const auto& type_node = type_decl->Type();
   return std::visit(BaseTypeGetter{}, type_node);
 }
 
@@ -131,7 +97,7 @@ TypeInfo TypeDecl2TypeInfo(
  */
 std::string Name2Str(const std::unique_ptr<parser::nodes::Name>& name) {
   auto& id_node =
-      std::get<std::unique_ptr<parser::nodes::IdNode>>(name->Children()[0]);
+      std::get<std::unique_ptr<parser::nodes::IdNode>>(name->Id());
 
   return ecs::Get<ecs::IdName>(*id_node).Value();
 }
@@ -144,7 +110,7 @@ std::string Name2Str(const std::unique_ptr<parser::nodes::Name>& name) {
 std::string Locator2Str(
     const std::unique_ptr<parser::nodes::Locator>& locator) {
   auto& id_node =
-      std::get<std::unique_ptr<parser::nodes::IdNode>>(locator->Children()[0]);
+      std::get<std::unique_ptr<parser::nodes::IdNode>>(locator->Id());
 
   return ecs::Get<ecs::IdName>(*id_node).Value();
 }
@@ -165,207 +131,234 @@ std::string Locator2Str(
  */
 class SymtabVisitor {
  public:
-  bool HasError() const { return has_error_; }
+  [[nodiscard]] bool HasError() const { return has_error_; }
 
-  void operator()(auto& ptr) {
-    if (ptr == nullptr) {
-      return;
-    }
-
-    for (auto& child : ptr->ChildrenSpan()) {
-      std::visit(*this, child);
-    }
-  }
-
-  void operator()(std::unique_ptr<parser::nodes::Program>& prog) {
-    if (prog == nullptr) {
-      return;
-    }
-
-    symtab_.EnterScope();
-
-    for (auto& child : prog->ChildrenSpan()) {
-      auto& func =
-          std::get<std::unique_ptr<parser::nodes::FunctionDefinition>>(child);
-      CollectFunctionDefinition(func);
-    }
-
-    for (auto& child : prog->ChildrenSpan()) {
-      auto& func =
-          std::get<std::unique_ptr<parser::nodes::FunctionDefinition>>(child);
-
-      FunctionDefinition(func);
-    }
-    return;
-
-    symtab_.ExitScope();
-  }
-
-  void operator()(std::unique_ptr<parser::nodes::BlockStatement>& block) {
-    if (block == nullptr) {
-      return;
-    }
-
-    symtab_.EnterScope();
-    BlockStmt(block);
-    symtab_.ExitScope();
-  }
-
-  void operator()(std::unique_ptr<parser::nodes::VariableDefinition>& def) {
-    if (def == nullptr) {
-      return;
-    }
-
-    auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
-        def->Children()[0]);
-    TypeInfo type = TypeDecl2TypeInfo(type_decl);
-
-    auto& name_node =
-        std::get<std::unique_ptr<parser::nodes::Name>>(def->Children()[1]);
-    std::string name = Name2Str(name_node);
-
-    auto symbol = std::make_unique<VariableSymbol>(type, name);
-    if (!symtab_.RegisterSymbol(name, symbol.get())) {
-      std::cout << "duplicate symbol " << name << "\n";
-      has_error_ = true;
-      return;
-    }
-
-    ecs::Set<ecs::VariableDef>(*def, std::move(symbol));
-  }
-
-  void operator()(std::unique_ptr<parser::nodes::Locator>& locator) {
-    if (locator == nullptr) {
-      return;
-    }
-
-    std::string name = Locator2Str(locator);
-
-    auto def = symtab_.Lookup(name);
-    if (def.symbol == nullptr) {
-      std::cout << "unknown symbol" << name << "\n";
-      has_error_ = true;
-      return;
-    }
-
-    ecs::Set<ecs::SymbolUse>(*locator, def.symbol);
-  }
+  void operator()(auto& ptr);
+  void operator()(std::unique_ptr<parser::nodes::Program>& prog);
+  void operator()(std::unique_ptr<parser::nodes::BlockStatement>& block);
+  void operator()(std::unique_ptr<parser::nodes::VariableDefinition>& def);
+  void operator()(std::unique_ptr<parser::nodes::Locator>& locator);
 
  private:
   void CollectFunctionDefinition(
-      std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
-    assert(func != nullptr);
-
-    auto return_type = GetFunctionReturnType(func);
-    auto name = GetFunctionId(func);
-    auto args = GetFunctionArgs(func);
-
-    auto symbol =
-        std::make_unique<FunctionSymbol>(return_type, name, std::move(args));
-    if (!symtab_.RegisterSymbol(name, symbol.get())) {
-      std::cout << "duplicate symbol " << name << "\n";
-      has_error_ = true;
-    }
-    ecs::Set<ecs::FunctionDef>(*func, std::move(symbol));
-  }
+      std::unique_ptr<parser::nodes::FunctionDefinition>& func);
 
   static TypeInfo GetFunctionReturnType(
-      std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
-    assert(func != nullptr);
-
-    auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
-        func->Children()[0]);
-
-    return TypeDecl2TypeInfo(type_decl);
-  }
+      std::unique_ptr<parser::nodes::FunctionDefinition>& func);
 
   static std::string GetFunctionId(
-      std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
-    assert(func != nullptr);
-
-    auto& name =
-        std::get<std::unique_ptr<parser::nodes::Name>>(func->Children()[1]);
-    return Name2Str(name);
-  }
+      std::unique_ptr<parser::nodes::FunctionDefinition>& func);
 
   static std::vector<TypeInfo> GetFunctionArgs(
-      std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
-    assert(func != nullptr);
-
-    auto& params = std::get<std::unique_ptr<parser::nodes::ParameterList>>(
-        func->Children()[2]);
-
-    std::vector<TypeInfo> res;
-    res.reserve(params->Children().size());
-
-    for (auto& param : params->ChildrenSpan()) {
-      auto& param_node =
-          std::get<std::unique_ptr<parser::nodes::ParameterDecl>>(param);
-      auto& type_decl =
-          std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
-              param_node->Children()[0]);
-      res.push_back(TypeDecl2TypeInfo(type_decl));
-    }
-
-    return res;
-  }
+      std::unique_ptr<parser::nodes::FunctionDefinition>& func);
 
   void FunctionDefinition(
-      std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
-    assert(func != nullptr);
-    symtab_.EnterScope();
+      std::unique_ptr<parser::nodes::FunctionDefinition>& func);
 
-    auto& params = std::get<std::unique_ptr<parser::nodes::ParameterList>>(
-        func->Children()[2]);
-
-    for (auto& param : params->ChildrenSpan()) {
-      auto& param_node =
-          std::get<std::unique_ptr<parser::nodes::ParameterDecl>>(param);
-      ParamDecl(param_node);
-    }
-
-    auto& body = std::get<std::unique_ptr<parser::nodes::BlockStatement>>(
-        func->Children()[3]);
-    BlockStmt(body);
-
-    symtab_.ExitScope();
-  }
-
-  void ParamDecl(std::unique_ptr<parser::nodes::ParameterDecl>& decl) {
-    assert(decl != nullptr);
-
-    auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
-        decl->Children()[0]);
-    TypeInfo type = TypeDecl2TypeInfo(type_decl);
-
-    auto& name_node =
-        std::get<std::unique_ptr<parser::nodes::Name>>(decl->Children()[1]);
-    std::string name = Name2Str(name_node);
-
-    auto symbol = std::make_unique<VariableSymbol>(type, name);
-    if (!symtab_.RegisterSymbol(name, symbol.get())) {
-      // TODO better errors
-      std::cout << "duplicate symbol " << name << "\n";
-      has_error_ = true;
-    }
-    ecs::Set<ecs::VariableDef>(*decl, std::move(symbol));
-  }
-
-  void BlockStmt(std::unique_ptr<parser::nodes::BlockStatement>& block) {
-    assert(block != nullptr);
-    symtab_.EnterScope();
-
-    for (auto& child : block->ChildrenSpan()) {
-      std::visit(*this, child);
-    }
-
-    symtab_.ExitScope();
-  }
+  void ParamDecl(std::unique_ptr<parser::nodes::ParameterDecl>& decl);
+  void BlockStmt(std::unique_ptr<parser::nodes::BlockStatement>& block);
 
   SymtabHelper symtab_;
   bool has_error_{false};
 };
 
+void SymtabVisitor::operator()(auto& ptr) {
+  if (ptr == nullptr) {
+    return;
+  }
+
+  for (auto& child : ptr->ChildrenSpan()) {
+    std::visit(*this, child);
+  }
+}
+
+void SymtabVisitor::operator()(std::unique_ptr<parser::nodes::Program>& prog) {
+  if (prog == nullptr) {
+    return;
+  }
+
+  symtab_.EnterScope();
+
+  for (auto& child : prog->ChildrenSpan()) {
+    auto& func =
+        std::get<std::unique_ptr<parser::nodes::FunctionDefinition>>(child);
+    CollectFunctionDefinition(func);
+  }
+
+  for (auto& child : prog->ChildrenSpan()) {
+    auto& func =
+        std::get<std::unique_ptr<parser::nodes::FunctionDefinition>>(child);
+
+    FunctionDefinition(func);
+  }
+  return;
+
+  symtab_.ExitScope();
+}
+
+void SymtabVisitor::operator()(
+    std::unique_ptr<parser::nodes::BlockStatement>& block) {
+  if (block == nullptr) {
+    return;
+  }
+
+  symtab_.EnterScope();
+  BlockStmt(block);
+  symtab_.ExitScope();
+}
+
+void SymtabVisitor::operator()(
+    std::unique_ptr<parser::nodes::VariableDefinition>& def) {
+  if (def == nullptr) {
+    return;
+  }
+
+  auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
+      def->Type());
+  TypeInfo type = TypeDecl2TypeInfo(type_decl);
+
+  auto& name_node =
+      std::get<std::unique_ptr<parser::nodes::Name>>(def->Name());
+  std::string name = Name2Str(name_node);
+
+  auto symbol = std::make_unique<VariableSymbol>(type, name);
+  if (!symtab_.RegisterSymbol(name, symbol.get())) {
+    std::cout << "duplicate symbol " << name << "\n";
+    has_error_ = true;
+    return;
+  }
+
+  ecs::Set<ecs::VariableDef>(*def, std::move(symbol));
+}
+
+void SymtabVisitor::operator()(
+    std::unique_ptr<parser::nodes::Locator>& locator) {
+  if (locator == nullptr) {
+    return;
+  }
+
+  std::string name = Locator2Str(locator);
+
+  auto* symbol = symtab_.Lookup(name);
+  if (symbol == nullptr) {
+    std::cout << "unknown symbol" << name << "\n";
+    has_error_ = true;
+    return;
+  }
+
+  ecs::Set<ecs::SymbolUse>(*locator, symbol);
+}
+
+void SymtabVisitor::CollectFunctionDefinition(
+    std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
+  assert(func != nullptr);
+
+  auto return_type = GetFunctionReturnType(func);
+  auto name = GetFunctionId(func);
+  auto args = GetFunctionArgs(func);
+
+  auto symbol =
+      std::make_unique<FunctionSymbol>(return_type, name, std::move(args));
+  if (!symtab_.RegisterSymbol(name, symbol.get())) {
+    std::cout << "duplicate symbol " << name << "\n";
+    has_error_ = true;
+  }
+  ecs::Set<ecs::FunctionDef>(*func, std::move(symbol));
+}
+
+TypeInfo SymtabVisitor::GetFunctionReturnType(
+    std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
+  assert(func != nullptr);
+
+  auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
+      func->ReturnType());
+
+  return TypeDecl2TypeInfo(type_decl);
+}
+
+std::string SymtabVisitor::GetFunctionId(
+    std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
+  assert(func != nullptr);
+
+  auto& name =
+      std::get<std::unique_ptr<parser::nodes::Name>>(func->Name());
+  return Name2Str(name);
+}
+
+std::vector<TypeInfo> SymtabVisitor::GetFunctionArgs(
+    std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
+  assert(func != nullptr);
+
+  auto& params = std::get<std::unique_ptr<parser::nodes::ParameterList>>(
+      func->Params());
+
+  std::vector<TypeInfo> res;
+  res.reserve(params->Children().size());
+
+  for (auto& param : params->ChildrenSpan()) {
+    auto& param_node =
+        std::get<std::unique_ptr<parser::nodes::ParameterDecl>>(param);
+    auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
+        param_node->Type());
+    res.push_back(TypeDecl2TypeInfo(type_decl));
+  }
+
+  return res;
+}
+
+void SymtabVisitor::FunctionDefinition(
+    std::unique_ptr<parser::nodes::FunctionDefinition>& func) {
+  assert(func != nullptr);
+  symtab_.EnterScope();
+
+  auto& params = std::get<std::unique_ptr<parser::nodes::ParameterList>>(
+      func->Params());
+
+  for (auto& param : params->ChildrenSpan()) {
+    auto& param_node =
+        std::get<std::unique_ptr<parser::nodes::ParameterDecl>>(param);
+    ParamDecl(param_node);
+  }
+
+  auto& body = std::get<std::unique_ptr<parser::nodes::BlockStatement>>(
+      func->Body());
+  BlockStmt(body);
+
+  symtab_.ExitScope();
+}
+
+void SymtabVisitor::ParamDecl(
+    std::unique_ptr<parser::nodes::ParameterDecl>& decl) {
+  assert(decl != nullptr);
+
+  auto& type_decl = std::get<std::unique_ptr<parser::nodes::TypeDeclaration>>(
+      decl->Type());
+  TypeInfo type = TypeDecl2TypeInfo(type_decl);
+
+  auto& name_node =
+      std::get<std::unique_ptr<parser::nodes::Name>>(decl->Name());
+  std::string name = Name2Str(name_node);
+
+  auto symbol = std::make_unique<VariableSymbol>(type, name);
+  if (!symtab_.RegisterSymbol(name, symbol.get())) {
+    // TODO better errors
+    std::cout << "duplicate symbol " << name << "\n";
+    has_error_ = true;
+  }
+  ecs::Set<ecs::VariableDef>(*decl, std::move(symbol));
+}
+
+void SymtabVisitor::BlockStmt(
+    std::unique_ptr<parser::nodes::BlockStatement>& block) {
+  assert(block != nullptr);
+  symtab_.EnterScope();
+
+  for (auto& child : block->ChildrenSpan()) {
+    std::visit(*this, child);
+  }
+
+  symtab_.ExitScope();
+}
 }  // namespace
 
 bool BuildSymtab(parser::nodes::NodesVariant& ast) {
