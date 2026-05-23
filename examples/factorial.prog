@@ -5,9 +5,3 @@ uint Factorial(uint x){
 
   return x * Factorial(x - 1);
 }
-
-int main(){
-  print_uint(Factorial(5));
-
-  return 0;
-}

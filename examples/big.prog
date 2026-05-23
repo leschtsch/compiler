@@ -2,6 +2,7 @@ int foo(int x, int y) {
   int z = 0;
   while z < 3 {
     x = x + 1;
+    x = x * 2;
   }
 
   return (x + y) % 2 == 0;
@@ -10,9 +11,9 @@ int foo(int x, int y) {
 int entry_point(int arg) {
   foo(1, 2);
 
-  if foo(1, 1 + 2 * 3 / 4) == 0 || !(0 == 1.5) {
+  if foo(1, 1 + 2 * 3 / 4) == 0 || !(0 % 1 == 1.5) {
     return 0;
   } else {
-    return (1 +  /* error intentional */ ) * (3 + 4);
+    return (1 +  2) * (3 + 4);
   }
 }

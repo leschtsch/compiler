@@ -1,4 +1,4 @@
-int main() {
+int entry_point(int arg) {
   int x = 0;
   int x = 0;
 

@@ -15,7 +15,7 @@ Or you may build it manually using cmake. You probably want
 ```
 
 Then you can run program with `./bin/main < program`.
-Currently it produces ast and symtab dump in graphviz-dot format to stdout.
+Currently it produces llvm IR.
 
 To run tests:
 ```bash

@@ -223,7 +223,7 @@ void SymtabVisitor::operator()(
 
   auto symbol = std::make_unique<VariableSymbol>(type, name);
   if (!symtab_.RegisterSymbol(name, symbol.get())) {
-    std::cout << "duplicate symbol " << name << "\n";
+    std::cerr << "duplicate symbol " << name << "\n";
     has_error_ = true;
     return;
   }
@@ -241,7 +241,7 @@ void SymtabVisitor::operator()(
 
   auto* symbol = symtab_.Lookup(name);
   if (symbol == nullptr) {
-    std::cout << "unknown symbol" << name << "\n";
+    std::cerr << "unknown symbol" << name << "\n";
     has_error_ = true;
     return;
   }
@@ -260,7 +260,7 @@ void SymtabVisitor::CollectFunctionDefinition(
   auto symbol =
       std::make_unique<FunctionSymbol>(return_type, name, std::move(args));
   if (!symtab_.RegisterSymbol(name, symbol.get())) {
-    std::cout << "duplicate symbol " << name << "\n";
+    std::cerr << "duplicate symbol " << name << "\n";
     has_error_ = true;
   }
   ecs::Set<ecs::FunctionDef>(*func, std::move(symbol));
@@ -320,9 +320,7 @@ void SymtabVisitor::FunctionDefinition(
     ParamDecl(param_node);
   }
 
-  auto& body = std::get<std::unique_ptr<parser::nodes::BlockStatement>>(
-      func->Body());
-  BlockStmt(body);
+  std::visit(*this, func->Body());
 
   symtab_.ExitScope();
 }
@@ -342,7 +340,7 @@ void SymtabVisitor::ParamDecl(
   auto symbol = std::make_unique<VariableSymbol>(type, name);
   if (!symtab_.RegisterSymbol(name, symbol.get())) {
     // TODO better errors
-    std::cout << "duplicate symbol " << name << "\n";
+    std::cerr << "duplicate symbol " << name << "\n";
     has_error_ = true;
   }
   ecs::Set<ecs::VariableDef>(*decl, std::move(symbol));

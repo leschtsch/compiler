@@ -1,3 +1,6 @@
+#include <ir/emit_ir.hpp>
+#include <lexer/lexer.hpp>
+#include <lexer/tokens.hpp>
 #include <misc/dump_ast.hpp>
 #include <parser/parser.hpp>
 #include <semantics/build_symtab.hpp>
@@ -5,9 +8,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include "lexer/lexer.hpp"
-#include "lexer/tokens.hpp"
 
 auto main() -> int {
   std::string input;
@@ -27,5 +27,6 @@ auto main() -> int {
 
   auto ast = parser::Parse(vec_input);
   semantics::BuildSymtab(ast);
-  misc::DumpAst(std::cout, ast);
+  // misc::DumpAst(std::cout, ast);
+  ir::EmitIr(std::cout, ast);
 }
