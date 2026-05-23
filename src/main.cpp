@@ -1,4 +1,4 @@
-#include <ir/emit_ir.hpp>
+#include <ir/codegen.hpp>
 #include <lexer/lexer.hpp>
 #include <lexer/tokens.hpp>
 #include <misc/dump_ast.hpp>
@@ -28,5 +28,6 @@ auto main() -> int {
   auto ast = parser::Parse(vec_input);
   semantics::BuildSymtab(ast);
   // misc::DumpAst(std::cout, ast);
-  ir::EmitIr(std::cout, ast);
+  // ir::EmitIr(std::cout, ast);
+  ir::Compile("./output/prog.o", ast);
 }

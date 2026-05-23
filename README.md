@@ -15,7 +15,7 @@ Or you may build it manually using cmake. You probably want
 ```
 
 Then you can run program with `./bin/main < program`.
-Currently it produces llvm IR.
+Currently it produces creates object file at `./output/prog.o`.
 
 To run tests:
 ```bash

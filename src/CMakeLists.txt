@@ -5,4 +5,4 @@ ADD_SUBDIRECTORY(ir)
 ADD_SUBDIRECTORY(misc)
 
 ADD_EXECUTABLE(main main.cpp)
-TARGET_LINK_LIBRARIES(main PRIVATE project_options lexer parser dump_ast build_symtab emit_ir)
+TARGET_LINK_LIBRARIES(main PRIVATE project_options lexer parser dump_ast build_symtab codegen)

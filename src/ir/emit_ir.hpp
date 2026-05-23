@@ -2,10 +2,13 @@
 
 #include <parser/ast.hpp>
 
-#include <ostream>
+#include <memory>
+
+#include "llvm/IR/Module.h"
 
 namespace ir {
 
-bool EmitIr(std::ostream& ostream, const parser::nodes::NodesVariant& node);
+std::unique_ptr<llvm::Module> EmitIrImpl(
+    const parser::nodes::NodesVariant& node);
 
 }  // namespace ir

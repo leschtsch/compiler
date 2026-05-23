@@ -1,10 +1,20 @@
 FIND_PACKAGE(LLVM REQUIRED CONFIG)
 
-llvm_map_components_to_libnames(llvm_libs core irreader support native)
+llvm_map_components_to_libnames(llvm_libs core irreader support native codegen X86
+  mc analysis transformutils
+)
 
 ADD_LIBRARY(emit_ir STATIC emit_ir.cpp)
 TARGET_COMPILE_DEFINITIONS(emit_ir PRIVATE ${LLVM_DEFINITIONS})
 TARGET_INCLUDE_DIRECTORIES(emit_ir SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(emit_ir PRIVATE project_options ${llvm_libs})
 
+ADD_LIBRARY(compile STATIC compile.cpp)
+TARGET_COMPILE_DEFINITIONS(compile PRIVATE ${LLVM_DEFINITIONS})
+TARGET_INCLUDE_DIRECTORIES(compile SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(compile PRIVATE project_options ${llvm_libs})
 
+ADD_LIBRARY(codegen STATIC codegen.cpp)
+TARGET_COMPILE_DEFINITIONS(codegen PRIVATE ${LLVM_DEFINITIONS})
+TARGET_INCLUDE_DIRECTORIES(codegen SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(codegen PRIVATE emit_ir compile project_options ${llvm_libs})
