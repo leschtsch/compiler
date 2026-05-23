@@ -3,19 +3,30 @@
 #include <ecs/ecs.hpp>
 #include <ecs/used_components.hpp>
 #include <parser/ast.hpp>
+#include <semantics/symbols.hpp>
+#include <semantics/types.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <variant>
+#include <vector>
 
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_os_ostream.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace ir {
 
@@ -662,6 +673,7 @@ llvm::Value* IrEmitter::DefaultRet(semantics::BasicTypes type) {
     }
 
     default:
+      break;
   }
 
   Error("unknown type");
@@ -707,6 +719,7 @@ llvm::Value* IrEmitter::TypeConversion(semantics::BasicTypes from_t,
         default:
           break;
       }
+      break;
     }
     case BasicTypes::kInt: {
       switch (to_t) {
@@ -719,6 +732,7 @@ llvm::Value* IrEmitter::TypeConversion(semantics::BasicTypes from_t,
         default:
           break;
       }
+      break;
     }
     case BasicTypes::kUint: {
       switch (to_t) {
@@ -731,6 +745,7 @@ llvm::Value* IrEmitter::TypeConversion(semantics::BasicTypes from_t,
         default:
           break;
       }
+      break;
     }
     case BasicTypes::kFloat: {
       switch (to_t) {
@@ -742,6 +757,7 @@ llvm::Value* IrEmitter::TypeConversion(semantics::BasicTypes from_t,
         default:
           break;
       }
+      break;
     }
     default:
       break;
