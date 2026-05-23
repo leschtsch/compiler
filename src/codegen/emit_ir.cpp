@@ -25,7 +25,6 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace ir {
@@ -793,7 +792,7 @@ llvm::AllocaInst* IrEmitter::CreateEntryBlockAlloca(
 
 }  // namespace
 
-bool EmitIr(std::ostream& ostream, const parser::nodes::NodesVariant& node) {
+EmitIrRet EmitIrImpl(const parser::nodes::NodesVariant& node) {
   auto context = std::make_unique<llvm::LLVMContext>();
   auto module = std::make_unique<llvm::Module>("main", *context);
   auto builder = std::make_unique<llvm::IRBuilder<>>(*context);
@@ -801,12 +800,16 @@ bool EmitIr(std::ostream& ostream, const parser::nodes::NodesVariant& node) {
   IrEmitter emitter(context, module, builder);
   emitter.Program(node);
 
-  bool res = emitter.HasError() && llvm::verifyModule(*module, &llvm::errs());
+  bool has_err =
+      emitter.HasError() && llvm::verifyModule(*module, &llvm::errs());
 
-  auto raw_os_ostream = llvm::raw_os_ostream(ostream);
-  module->print(raw_os_ostream, nullptr);
+  if (has_err) {
+    return EmitIrRet{};
+  }
 
-  return res;
+  return {.ctx = std::move(context),
+          .mod = std::move(module),
+          .builder = std::move(builder)};
 }
 
 }  // namespace ir
