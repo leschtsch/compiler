@@ -2,10 +2,10 @@
 
 #include <iostream>
 #include <memory>
-#include <optional>
 
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/ManagedStatic.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -64,7 +64,7 @@ bool CompileImpl(const std::string& filename,
 
   llvm::TargetOptions opt;
   auto* target_machine = target->createTargetMachine(
-      llvm::Triple(target_triple), "generic", "", opt, std::nullopt);
+      llvm::Triple(target_triple), "generic", "", opt, llvm::Reloc::PIC_);
 
   module->setDataLayout(target_machine->createDataLayout());
 
@@ -87,6 +87,7 @@ bool CompileImpl(const std::string& filename,
   pass.run(*module);
   dest.flush();
 
+  delete target_machine;
   return true;
 }
 

@@ -1,7 +1,7 @@
 #include "codegen.hpp"
 
-#include <ir/compile.hpp>
-#include <ir/emit_ir.hpp>
+#include <codegen/compile.hpp>
+#include <codegen/emit_ir.hpp>
 
 #include <ostream>
 
@@ -11,7 +11,7 @@
 namespace ir {
 
 bool EmitIr(std::ostream& ostream, const parser::nodes::NodesVariant& node) {
-  auto module = EmitIrImpl(node);
+  auto [ctx, module, builder] = EmitIrImpl(node);
   if (!module) {
     return false;
   }
@@ -24,7 +24,7 @@ bool EmitIr(std::ostream& ostream, const parser::nodes::NodesVariant& node) {
 
 bool Compile(const std::string& filename,
              const parser::nodes::NodesVariant& node) {
-  auto module = EmitIrImpl(node);
+  auto [ctx, module, builder] = EmitIrImpl(node);
   return CompileImpl(filename, module);
 }
 

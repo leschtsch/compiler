@@ -792,7 +792,7 @@ llvm::AllocaInst* IrEmitter::CreateEntryBlockAlloca(
 
 }  // namespace
 
-std::unique_ptr<llvm::Module> EmitIrImpl(const parser::nodes::NodesVariant& node) {
+EmitIrRet EmitIrImpl(const parser::nodes::NodesVariant& node) {
   auto context = std::make_unique<llvm::LLVMContext>();
   auto module = std::make_unique<llvm::Module>("main", *context);
   auto builder = std::make_unique<llvm::IRBuilder<>>(*context);
@@ -800,13 +800,16 @@ std::unique_ptr<llvm::Module> EmitIrImpl(const parser::nodes::NodesVariant& node
   IrEmitter emitter(context, module, builder);
   emitter.Program(node);
 
-  bool has_err = emitter.HasError() && llvm::verifyModule(*module, &llvm::errs());
+  bool has_err =
+      emitter.HasError() && llvm::verifyModule(*module, &llvm::errs());
 
-  if (has_err){
-    return nullptr;
+  if (has_err) {
+    return EmitIrRet{};
   }
 
-  return module;
+  return {.ctx = std::move(context),
+          .mod = std::move(module),
+          .builder = std::move(builder)};
 }
 
 }  // namespace ir
